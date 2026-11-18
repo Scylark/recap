@@ -2,7 +2,7 @@
   <img src="./assets/recap-logo-full.png" alt="Recap" width="280" />
   <h1>Recap</h1>
   <p><strong>Lightweight, privacy-first usability testing for web prototypes.</strong></p>
-  <p>Drop-in click heatmaps, scroll depth tracking, and AI-ready session exports. Zero cookies, zero backend, under 10KB.</p>
+  <p>Drop-in click heatmaps, scroll depth tracking, and AI-ready session exports. Zero cookies, zero backend.</p>
 
   <p>
     <a href="https://www.npmjs.com/package/recap-ux"><img src="https://img.shields.io/npm/v/recap-ux?color=0891b2&label=npm" alt="npm version" /></a>
@@ -48,19 +48,19 @@ A ready-to-run moderated validation script lives at [`examples/in-person-usabili
 - **Click positions** with auto-generated CSS selectors and semantic element labels
 - **Scroll depth** per page, with milestone and continuous tracking
 - **Navigation flow** — which pages users visited, in what order, for how long
-- **Interaction patterns** — hesitation, rapid clicks, backtracking, ignored regions
+- **Interaction patterns** — hesitation, rapid clicks, backtracking
 
-Everything is processed entirely in the browser. No cookies. No IP addresses. No text or form values captured. No data ever leaves the participant's device unless they explicitly download and share it.
+Everything is processed in the browser. No cookies. No IP addresses. Data stays on the device where the test runs unless you export it or set up a `data-endpoint` (see [Advanced](#advanced)).
 
 ## Why Recap
 
 **One line of HTML.** No accounts, no keys, no dashboards to configure. Add the script tag and you're recording.
 
-**Privacy by architecture.** GDPR-friendly because there's nothing to be compliant about — Recap collects no personal data and sends nothing over the network. Perfect for testing with real users in regulated industries.
+**Privacy by design.** Recap sets no cookies and sends nothing by default. Data stays on the test device until you export it. Exports can still contain personal data, so treat them like any research data.
 
 **AI-ready.** Exports a structured session summary that Claude or ChatGPT can actually reason about — not just raw coordinates, but a narrative of hesitation, frustration, backtracking, and friction points. Comes with a ready-to-use prompt template.
 
-**Under 10KB.** Drops into Claude artefacts, Vercel previews, Framer sites, plain HTML — anywhere a `<script>` tag works.
+**One script tag.** Drops into Claude artefacts, Vercel previews, Framer sites, plain HTML — anywhere a `<script>` tag works.
 
 ## Live demo
 
@@ -101,6 +101,12 @@ To exclude sensitive elements from tracking:
 Click **"Export for AI"** in the researcher panel to get a structured JSON summary optimised for LLM analysis. Paste it into Claude with the included prompt template to get a full UX analysis covering friction points, navigation patterns, accessibility observations, and specific recommendations.
 
 The summary is a human-readable narrative of the session, not raw coordinates — an AI can reason about *"Participant hesitated for 12 seconds, then clicked an unlabelled element three times in rapid succession before backtracking"* in a way it never could with a dump of `pageX`/`pageY` values.
+
+## Advanced
+
+### Sending events to your own server
+
+Set `data-endpoint` on the script tag to a URL you control. Recap then posts captured events to that URL in batches, using `navigator.sendBeacon` with a `fetch` fallback. Nothing is sent unless this option is set, and the endpoint receives the same data the panel shows.
 
 ## Development
 
