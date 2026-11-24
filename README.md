@@ -18,7 +18,7 @@
 
 ## Try the live demo
 
-Try Recap on a live prototype at **[recap-ux.com](https://recap-ux.com)**. The site itself is instrumented with Recap, so click around, then press `Alt+Shift+R` to see your own session as a heatmap.
+Try Recap on a live prototype at **[recap-ux.com](https://recap-ux.com)**. The site itself is instrumented with Recap, so click around, then press `Alt+Shift+Y` to see your own session as a heatmap.
 
 ## Why Recap
 
@@ -47,7 +47,7 @@ Add one line to any prototype:
 <script defer src="https://cdn.jsdelivr.net/npm/recap-ux@1/dist/recap.min.js"></script>
 ```
 
-That's it. Recap starts recording silently. When you're ready to review, press `Alt+Shift+R` to open the researcher panel.
+That's it. Recap starts recording silently. When you're ready to review, press `Alt+Shift+Y` to open the researcher panel.
 
 ## AI analysis export
 
@@ -59,7 +59,7 @@ The summary is a human-readable narrative of the session, not raw coordinates �
 
 When you're testing in person and need to add another participant, open the same prototype in a new browser tab. Recap creates a new session per tab, so each participant is captured separately.
 
-On a phone or tablet there's no keyboard for `Alt+Shift+R` — hold **three fingers** on the screen for about **1.5 seconds** instead. It's a deliberately "hidden" gesture (no on-screen button), so it never shows up as something for the participant to notice or tap.
+On a phone or tablet there's no keyboard for `Alt+Shift+Y` — hold **three fingers** on the screen for about **1.5 seconds** instead. It's a deliberately "hidden" gesture (no on-screen button), so it never shows up as something for the participant to notice or tap.
 
 The researcher panel now includes:
 
@@ -77,10 +77,22 @@ All options are `data-*` attributes on the script tag:
 |-----------|---------|-------------|
 | `data-session-name` | auto | Label for this session, e.g. `"participant-04"` |
 | `data-show-panel` | `"false"` | Show researcher panel on load |
-| `data-shortcut` | `"alt+shift+r"` | Custom keyboard shortcut for the researcher panel |
+| `data-shortcut` | `"alt+shift+y"` | Keyboard shortcut for the researcher panel. Format: modifiers and one key joined by `+`, e.g. `"ctrl+shift+y"` |
+| `data-endpoint` | none | URL to POST captured events to in batches (see [Advanced](#advanced)) |
+| `data-strip-query-params` | `"true"` | Remove query strings from recorded URLs. Set to `"false"` to keep them |
 | `data-touch-trigger` | `"true"` | Hold 3 fingers on screen to open/close the panel on touch devices |
 | `data-touch-trigger-fingers` | `3` | Number of simultaneous touch points required |
 | `data-touch-trigger-hold-ms` | `1500` | Hold duration (ms) before the panel toggles |
+
+### Keyboard shortcut not working
+
+The shortcut is matched on the physical key, but another app can still claim the key combination before the browser sees it. If `Alt+Shift+Y` does nothing:
+
+- **Browser extensions:** open `chrome://extensions/shortcuts` in Chrome and look for the same combination. Clear it or change it there.
+- **Other apps:** check any global hotkey tools, such as dictation, screen recording or launcher apps.
+- **Windows:** `Alt+Shift` is the default keyboard-language switch. If your system uses it, pick a different shortcut.
+
+To use a different key, set `data-shortcut` on the script tag, for example `data-shortcut="ctrl+shift+y"`.
 
 ## Element labelling
 

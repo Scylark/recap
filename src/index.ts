@@ -65,15 +65,19 @@ export const Recap = {
     }
 
     // Keyboard shortcut to toggle panel
-    const shortcut = config.shortcut ?? 'Alt+Shift+R';
+    const shortcut = config.shortcut ?? 'Alt+Shift+Y';
     const onKey = (e: KeyboardEvent): void => {
+      // Ignore auto-repeat: holding the combo must not open and close the panel repeatedly.
+      if (e.repeat) return;
       if (matchesShortcut(e, shortcut)) {
         e.preventDefault();
         togglePanel();
       }
     };
-    document.addEventListener('keydown', onKey);
-    _destroyFns.push(() => document.removeEventListener('keydown', onKey));
+    // Capture phase on window, so the shortcut still fires when the page's own
+    // handlers stop propagation or focus sits on an element that swallows keys.
+    window.addEventListener('keydown', onKey, true);
+    _destroyFns.push(() => window.removeEventListener('keydown', onKey, true));
 
     // Touch-hold gesture to toggle panel (no keyboard on mobile/in-person tests)
     if (config.touchTrigger !== false) {

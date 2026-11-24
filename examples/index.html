@@ -24,6 +24,12 @@
     }
     nav a:hover { color: white; background: rgba(255,255,255,0.1); }
     nav a.active { color: white; border-bottom-color: #63b3ed; }
+    #open-recap {
+      margin-left: 16px; background: rgba(255,255,255,0.15); color: white;
+      border: 1px solid rgba(255,255,255,0.35); border-radius: 4px;
+      padding: 6px 12px; font-size: 0.85rem; cursor: pointer;
+    }
+    #open-recap:hover { background: rgba(255,255,255,0.25); }
 
     /* Layout */
     main { max-width: 1100px; margin: 0 auto; padding: 32px 40px; min-height: calc(100vh - 116px); }
@@ -178,17 +184,19 @@
       <a href="/reports" data-ut-label="Reports nav">Reports</a>
       <a href="/settings" data-ut-label="Settings nav">Settings</a>
     </nav>
+    <button id="open-recap" type="button">Open Recap panel</button>
   </header>
 
   <main id="app"><!-- content renders here --></main>
 
   <footer>
-    <p>DemoApp — Recap UX Demo &nbsp;·&nbsp; Press <kbd>Alt+Shift+R</kbd> (or hold 3 fingers for 1.5s on touch) to open the researcher panel</p>
+    <p>DemoApp — Recap UX Demo &nbsp;·&nbsp; Press <kbd>Alt+Shift+Y</kbd> (or hold 3 fingers for 1.5s on touch) to open the researcher panel</p>
   </footer>
 
   <script type="module">
     import { Recap } from 'recap-ux';
     Recap.init({ showPanel: false, sessionName: 'demo-session' });
+    document.getElementById('open-recap').addEventListener('click', () => Recap.openPanel());
 
     // ── Page content ───────────────────────────────────────────────────────────
 

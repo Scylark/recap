@@ -55,14 +55,14 @@ The heatmap uses a vendored implementation of the simpleheat algorithm (BSD-2 li
 
 `screenshot.ts` prompts the user to use their OS screenshot tool rather than importing html2canvas, keeping the bundle small.
 
-## Mode detection
+## Keyboard shortcut
 
-The `data-mode` attribute on the script tag controls which experience loads:
+The panel shortcut defaults to `Alt+Shift+Y` (`config.shortcut` or `data-shortcut`). It is wired up in `src/index.ts` as follows:
 
-- **`researcher` (default):** Full researcher panel accessible via `Alt+Shift+R`. No visible UI during recording.
-- **`participant`:** Simplified UI with a "Finish test" pill. No access to the researcher panel. On finish, prompts the participant to download and share their session file.
-
-Mode is read once at init from `document.currentScript.dataset.mode` and stored in the session config. It cannot be changed after init.
+- The listener is on `window` in the capture phase, so the shortcut still fires if the page's own handlers stop propagation.
+- Keys are matched on `e.code` (the physical key), not `e.key`, because on macOS Option changes the character that `e.key` reports.
+- Auto-repeat (`e.repeat`) is ignored, so holding the keys doesn't open and close the panel.
+- The shortcut can be claimed by a browser extension or another app before the page sees it. The README troubleshooting section covers this.
 
 ## Privacy guarantees
 
