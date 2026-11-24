@@ -29,12 +29,20 @@ const DEFAULT_RADIUS = 25;
 const DEFAULT_BLUR = 15;
 const DEFAULT_OPACITY = 0.65;
 
-// Color gradient: blue → cyan → green → yellow → red
+// Colour ramp, cool → hot: cyan (fewest clicks) → yellow → red (most clicks on this page).
+// Cyan/yellow stay visible on both light and dark page backgrounds.
 const DEFAULT_GRADIENT: Record<number, string> = {
-  0.4: 'blue',
-  0.65: 'lime',
+  0: 'cyan',
+  0.5: 'yellow',
   1: 'red',
 };
+
+// Pixels with less than this accumulated density (out of 255) are treated as
+// blur halo and not drawn, so the edges of a single click stay tidy.
+const MIN_DENSITY = 4;
+// Every pixel that is drawn gets at least this opacity (0–1), so even a single
+// click is a clear mark. Hotter spots go up to fully opaque.
+const MIN_OUTPUT_OPACITY = 0.8;
 
 let _canvas: HTMLCanvasElement | null = null;
 let _ctx: CanvasRenderingContext2D | null = null;
@@ -85,17 +93,30 @@ function createColorGradient(stops: Record<number, string>): Uint8ClampedArray {
   return cx.getImageData(0, 0, 256, 1).data;
 }
 
+// Scales density relative to the busiest point on the canvas, so the hottest
+// spot is always red and everything else is scaled against it. A square-root
+// curve lifts low counts so a single click is still visible next to a hotspot.
 function colorize(pixels: ImageData, gradient: Uint8ClampedArray): void {
   const data = pixels.data;
+
+  let maxDensity = 0;
+  for (let i = 3, len = data.length; i < len; i += 4) {
+    if (data[i]! > maxDensity) maxDensity = data[i]!;
+  }
+  if (maxDensity === 0) return;
+
   for (let i = 0, len = data.length; i < len; i += 4) {
-    const alpha = data[i + 3]!;
-    if (alpha > 0) {
-      const idx = alpha * 4;
-      data[i] = gradient[idx]!;
-      data[i + 1] = gradient[idx + 1]!;
-      data[i + 2] = gradient[idx + 2]!;
-      data[i + 3] = alpha;
+    const density = data[i + 3]!;
+    if (density < MIN_DENSITY) {
+      data[i + 3] = 0;
+      continue;
     }
+    const t = Math.sqrt(density / maxDensity); // 0..1, 1 = hottest point
+    const idx = Math.round(t * 255) * 4;
+    data[i] = gradient[idx]!;
+    data[i + 1] = gradient[idx + 1]!;
+    data[i + 2] = gradient[idx + 2]!;
+    data[i + 3] = Math.round(255 * (MIN_OUTPUT_OPACITY + (1 - MIN_OUTPUT_OPACITY) * t));
   }
 }
 
