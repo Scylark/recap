@@ -1308,6 +1308,7 @@ function renderHeatmap(clicks, filter) {
   _clicks = clicks;
   _filter = filter ?? null;
   resizeCanvas();
+  if (_canvas.width === 0 || _canvas.height === 0) return;
   _ctx.clearRect(0, 0, _canvas.width, _canvas.height);
   const currentPage = location.pathname;
   const visible = _filter ? clicks.filter(
@@ -2924,15 +2925,16 @@ const Recap = {
         void flush().then(() => openPanel());
       }
     }
-    const shortcut = config.shortcut ?? "Alt+Shift+R";
+    const shortcut = config.shortcut ?? "Alt+Shift+Y";
     const onKey = (e) => {
+      if (e.repeat) return;
       if (matchesShortcut(e, shortcut)) {
         e.preventDefault();
         togglePanel();
       }
     };
-    document.addEventListener("keydown", onKey);
-    _destroyFns.push(() => document.removeEventListener("keydown", onKey));
+    window.addEventListener("keydown", onKey, true);
+    _destroyFns.push(() => window.removeEventListener("keydown", onKey, true));
     if (config.touchTrigger !== false) {
       const touchTriggerOptions = {};
       if (config.touchTriggerFingers !== void 0) {
