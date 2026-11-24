@@ -1,14 +1,13 @@
 <div align="center">
   <img src="./assets/recap-logo-full.png" alt="Recap" width="280" />
   <h1>Recap</h1>
-  <p><strong>Lightweight, privacy-first usability testing for web prototypes.</strong></p>
-  <p>Drop-in click heatmaps, scroll depth tracking, and AI-ready session exports. Zero cookies, zero backend.</p>
+  <p><strong>Hotjar for AI prototypes.</strong></p>
 
   <p>
     <a href="https://www.npmjs.com/package/recap-ux"><img src="https://img.shields.io/npm/v/recap-ux?color=0891b2&label=npm" alt="npm version" /></a>
     <a href="https://bundlephobia.com/package/recap-ux"><img src="https://img.shields.io/bundlephobia/minzip/recap-ux?color=0891b2&label=size" alt="bundle size" /></a>
     <a href="./LICENSE"><img src="https://img.shields.io/npm/l/recap-ux?color=0891b2" alt="MIT license" /></a>
-    <a href="https://recaux.com"><img src="https://img.shields.io/badge/demo-live-0891b2" alt="live demo" /></a>
+    <a href="https://recap-ux.com"><img src="https://img.shields.io/badge/demo-live-0891b2" alt="live demo" /></a>
   </p>
 
   <br />
@@ -17,40 +16,9 @@
   <br /><br />
 </div>
 
-## Quick start
+## Try the live demo
 
-Add one line to any prototype:
-
-```html
-<script defer src="https://cdn.jsdelivr.net/npm/recap-ux@1/dist/recap.min.js"></script>
-```
-
-That's it. Recap starts recording silently. When you're ready to review, press `Alt+Shift+R` to open the researcher panel.
-
-### In-person moderated tests
-
-When you're testing in person and need to add another participant, open the same prototype in a new browser tab. Recap creates a new session per tab, so each participant is captured separately.
-
-On a phone or tablet there's no keyboard for `Alt+Shift+R` — hold **three fingers** on the screen for about **1.5 seconds** instead. It's a deliberately "hidden" gesture (no on-screen button), so it never shows up as something for the participant to notice or tap.
-
-The researcher panel now includes:
-
-- A `Session` help icon directly beside the label
-- A hover/focus tooltip with: "To add another participant, open this prototype in a new tab."
-- An `Open in new tab` shortcut inside the tooltip
-
-For lightweight instrumentation, Recap emits a `recap:participant-guidance` browser event and stores aggregate counts in local storage under `recap-participant-guidance-metrics`.
-
-A ready-to-run moderated validation script lives at [`examples/in-person-usability-validation.md`](./examples/in-person-usability-validation.md).
-
-## What Recap captures
-
-- **Click positions** with auto-generated CSS selectors and semantic element labels
-- **Scroll depth** per page, with milestone and continuous tracking
-- **Navigation flow** — which pages users visited, in what order, for how long
-- **Interaction patterns** — hesitation, rapid clicks, backtracking
-
-Everything is processed in the browser. No cookies. No IP addresses. Data stays on the device where the test runs unless you export it or set up a `data-endpoint` (see [Advanced](#advanced)).
+Try Recap on a live prototype at **[recap-ux.com](https://recap-ux.com)**. The site itself is instrumented with Recap, so click around, then press `Alt+Shift+R` to see your own session as a heatmap.
 
 ## Why Recap
 
@@ -62,9 +30,44 @@ Everything is processed in the browser. No cookies. No IP addresses. Data stays 
 
 **One script tag.** Drops into Claude artefacts, Vercel previews, Framer sites, plain HTML — anywhere a `<script>` tag works.
 
-## Live demo
+## What Recap captures
 
-Try Recap on a live prototype at **[recap-ux.com](https://recap-ux.com)** — the site itself is instrumented with Recap, so you can click around, then press `Alt+Shift+R` to see your own session as a heatmap.
+- **Click positions** with auto-generated CSS selectors and semantic element labels
+- **Scroll depth** per page, with milestone and continuous tracking
+- **Navigation flow** — which pages users visited, in what order, for how long
+- **Interaction patterns** — hesitation, rapid clicks, backtracking
+
+Everything is processed in the browser. No cookies. No IP addresses. Data stays on the device where the test runs unless you export it or set up a `data-endpoint` (see [Advanced](#advanced)).
+
+## Quick start
+
+Add one line to any prototype:
+
+```html
+<script defer src="https://cdn.jsdelivr.net/npm/recap-ux@1/dist/recap.min.js"></script>
+```
+
+That's it. Recap starts recording silently. When you're ready to review, press `Alt+Shift+R` to open the researcher panel.
+
+## AI analysis export
+
+Click **"Export for AI"** in the researcher panel to get a structured JSON summary optimised for LLM analysis. Paste it into Claude with the included prompt template to get a full UX analysis covering friction points, navigation patterns, accessibility observations, and specific recommendations.
+
+The summary is a human-readable narrative of the session, not raw coordinates — an AI can reason about *"Participant hesitated for 12 seconds, then clicked an unlabelled element three times in rapid succession before backtracking"* in a way it never could with a dump of `pageX`/`pageY` values.
+
+## In-person moderated tests
+
+When you're testing in person and need to add another participant, open the same prototype in a new browser tab. Recap creates a new session per tab, so each participant is captured separately.
+
+On a phone or tablet there's no keyboard for `Alt+Shift+R` — hold **three fingers** on the screen for about **1.5 seconds** instead. It's a deliberately "hidden" gesture (no on-screen button), so it never shows up as something for the participant to notice or tap.
+
+The researcher panel now includes:
+
+- A `Session` help icon directly beside the label
+- A hover/focus tooltip with: "To add another participant, open this prototype in a new tab."
+- An `Open in new tab` shortcut inside the tooltip
+
+A ready-to-run moderated validation script lives at [`examples/in-person-usability-validation.md`](./examples/in-person-usability-validation.md).
 
 ## Configuration
 
@@ -95,12 +98,6 @@ To exclude sensitive elements from tracking:
 <div class="ut-block">Hidden from tracking entirely</div>
 <span class="ut-mask">Text replaced with asterisks</span>
 ```
-
-## AI analysis export
-
-Click **"Export for AI"** in the researcher panel to get a structured JSON summary optimised for LLM analysis. Paste it into Claude with the included prompt template to get a full UX analysis covering friction points, navigation patterns, accessibility observations, and specific recommendations.
-
-The summary is a human-readable narrative of the session, not raw coordinates — an AI can reason about *"Participant hesitated for 12 seconds, then clicked an unlabelled element three times in rapid succession before backtracking"* in a way it never could with a dump of `pageX`/`pageY` values.
 
 ## Advanced
 
