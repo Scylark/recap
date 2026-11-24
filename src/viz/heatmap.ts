@@ -29,20 +29,39 @@ const DEFAULT_RADIUS = 25;
 const DEFAULT_BLUR = 15;
 const DEFAULT_OPACITY = 0.65;
 
-// Colour ramp, cool → hot: cyan (fewest clicks) → yellow → red (most clicks on this page).
-// Cyan/yellow stay visible on both light and dark page backgrounds.
+// Colour ramp, cool → hot: blue (fewest clicks) → yellow → red (most clicks on this page).
+// Blue holds across the lower part of the ramp, so a single click stays blue
+// even with a four-click reference.
 const DEFAULT_GRADIENT: Record<number, string> = {
-  0: 'cyan',
-  0.5: 'yellow',
+  0: 'blue',
+  0.3: 'blue',
+  0.6: 'yellow',
   1: 'red',
 };
 
-// Pixels with less than this accumulated density (out of 255) are treated as
-// blur halo and not drawn, so the edges of a single click stay tidy.
-const MIN_DENSITY = 4;
-// Every pixel that is drawn gets at least this opacity (0–1), so even a single
-// click is a clear mark. Hotter spots go up to fully opaque.
-const MIN_OUTPUT_OPACITY = 0.8;
+// Accumulated density (out of 255) at which the blur halo starts to fade in.
+// Fading across a band, rather than cutting off hard, keeps the edge smooth.
+const EDGE_FADE_START = 2;
+const EDGE_FADE_END = 12;
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+// Drawn pixels scale their opacity between these bounds (0–1): the coolest
+// spots are fairly faint, and the hottest spot tops out below fully opaque so
+// red does not overpower the page.
+const MIN_OUTPUT_OPACITY = 0.4;
+const MAX_OUTPUT_OPACITY = 0.8;
+
+// Each click is drawn at this alpha, so overlapping clicks build up density.
+const CLICK_ALPHA = 0.05;
+// Scaling never uses fewer clicks than this as its "hottest" reference. Without
+// it, a page with one or two clicks makes them both the maximum, so they show
+// as red. With it, sparse clicks sit at the cool (blue) end of the ramp, and
+// only real clusters reach red.
+const REFERENCE_CLICKS = 4;
+const MIN_REFERENCE_DENSITY = 255 * (1 - Math.pow(1 - CLICK_ALPHA, REFERENCE_CLICKS));
 
 let _canvas: HTMLCanvasElement | null = null;
 let _ctx: CanvasRenderingContext2D | null = null;
@@ -94,8 +113,8 @@ function createColorGradient(stops: Record<number, string>): Uint8ClampedArray {
 }
 
 // Scales density relative to the busiest point on the canvas, so the hottest
-// spot is always red and everything else is scaled against it. A square-root
-// curve lifts low counts so a single click is still visible next to a hotspot.
+// spot is red and everything else is scaled linearly against it. The reference
+// is never lower than MIN_REFERENCE_DENSITY, so a few clicks stay blue.
 function colorize(pixels: ImageData, gradient: Uint8ClampedArray): void {
   const data = pixels.data;
 
@@ -104,19 +123,23 @@ function colorize(pixels: ImageData, gradient: Uint8ClampedArray): void {
     if (data[i]! > maxDensity) maxDensity = data[i]!;
   }
   if (maxDensity === 0) return;
+  const reference = Math.max(maxDensity, MIN_REFERENCE_DENSITY);
 
   for (let i = 0, len = data.length; i < len; i += 4) {
     const density = data[i + 3]!;
-    if (density < MIN_DENSITY) {
+    if (density < EDGE_FADE_START) {
       data[i + 3] = 0;
       continue;
     }
-    const t = Math.sqrt(density / maxDensity); // 0..1, 1 = hottest point
+    const edge = smoothstep(EDGE_FADE_START, EDGE_FADE_END, density);
+    const t = Math.min(1, density / reference); // 0..1, 1 = hottest point
     const idx = Math.round(t * 255) * 4;
     data[i] = gradient[idx]!;
     data[i + 1] = gradient[idx + 1]!;
     data[i + 2] = gradient[idx + 2]!;
-    data[i + 3] = Math.round(255 * (MIN_OUTPUT_OPACITY + (1 - MIN_OUTPUT_OPACITY) * t));
+    data[i + 3] = Math.round(
+      255 * edge * (MIN_OUTPUT_OPACITY + (MAX_OUTPUT_OPACITY - MIN_OUTPUT_OPACITY) * t)
+    );
   }
 }
 
@@ -180,7 +203,7 @@ export function renderHeatmap(clicks: ClickEvent[], filter?: HeatmapFilter): voi
 
   // Use pageX/pageY (document-relative) adjusted by current scroll offset
   // so dots stay aligned with page content as the user scrolls.
-  _ctx.globalAlpha = 0.05;
+  _ctx.globalAlpha = CLICK_ALPHA;
   for (const click of visible) {
     const r = _radius + _blur;
     _ctx.drawImage(_circle!, click.pageX - window.scrollX - r, click.pageY - window.scrollY - r);
