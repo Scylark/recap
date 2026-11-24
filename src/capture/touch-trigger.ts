@@ -1,5 +1,5 @@
 // Touch-hold gesture that toggles the researcher panel on touch devices,
-// where the Alt+Shift+R keyboard shortcut is unavailable (e.g. an in-person
+// where the Alt+Shift+Y keyboard shortcut is unavailable (e.g. an in-person
 // mobile usability test). Deliberately requires several simultaneous,
 // near-stationary touch points so ordinary single/two-finger tapping and
 // scrolling can never trigger it by accident.
