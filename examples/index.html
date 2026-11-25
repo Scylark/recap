@@ -5,184 +5,171 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>DemoApp</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, -apple-system, sans-serif; color: #1a202c; background: #f7fafc; }
+    /* Generic product-site look: light grey panels, large centred headlines, a
+       translucent dark top bar and blue pill buttons. Styling only. */
+    :root {
+      --ink: #1d1d1f;
+      --ink-2: #6e6e73;
+      --bg: #ffffff;
+      --bg-2: #f5f5f7;
+      --line: #d2d2d7;
+      --line-soft: #e8e8ed;
+      --blue: #0066cc;
+      --blue-btn: #0071e3;
+      --blue-btn-hover: #0077ed;
+      --nav-bg: rgba(22, 22, 23, 0.8);
+      --nav-ink: #e8e8ed;
+    }
 
-    /* Header */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+      font-size: 17px; line-height: 1.47059; letter-spacing: -0.022em;
+      color: var(--ink); background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--blue); }
+
+    /* Top bar */
     header {
-      background: #2b6cb0; color: white; padding: 0 40px;
+      background: var(--nav-bg); color: var(--nav-ink);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
+      backdrop-filter: saturate(180%) blur(20px);
+      padding: 0 24px; height: 52px;
       display: flex; justify-content: space-between; align-items: center;
-      height: 56px; position: sticky; top: 0; z-index: 100;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      position: sticky; top: 0; z-index: 100;
     }
-    .logo { font-weight: 700; font-size: 1.1rem; letter-spacing: 0.02em; }
-    nav { display: flex; gap: 4px; }
+    .logo { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; color: #fff; white-space: nowrap; text-decoration: none; }
+    nav { display: flex; gap: 28px; justify-content: center; flex: 1; }
     nav a {
-      color: #bee3f8; text-decoration: none; padding: 6px 14px;
-      border-radius: 4px; font-size: 0.9rem; transition: background 0.15s, color 0.15s;
-      border-bottom: 2px solid transparent;
+      color: var(--nav-ink); text-decoration: none; font-size: 12px; font-weight: 400;
+      opacity: 0.8; transition: opacity 0.2s;
     }
-    nav a:hover { color: white; background: rgba(255,255,255,0.1); }
-    nav a.active { color: white; border-bottom-color: #63b3ed; }
+    nav a:hover { opacity: 1; }
+    nav a.active { opacity: 1; color: #fff; }
     #open-recap {
-      margin-left: 16px; background: rgba(255,255,255,0.15); color: white;
-      border: 1px solid rgba(255,255,255,0.35); border-radius: 4px;
-      padding: 6px 12px; font-size: 0.85rem; cursor: pointer;
+      background: var(--blue-btn); color: #fff; border: none;
+      border-radius: 980px; padding: 5px 14px; font-size: 12px; font-family: inherit;
+      cursor: pointer; white-space: nowrap; transition: background 0.2s;
     }
-    #open-recap:hover { background: rgba(255,255,255,0.25); }
+    #open-recap:hover { background: var(--blue-btn-hover); }
 
     /* Layout */
-    main { max-width: 1100px; margin: 0 auto; padding: 32px 40px; min-height: calc(100vh - 116px); }
+    main { max-width: 1040px; margin: 0 auto; padding: 40px 24px 72px; min-height: calc(100vh - 52px - 120px); }
     footer {
-      background: #2d3748; color: #a0aec0; padding: 24px 40px;
-      text-align: center; font-size: 0.85rem;
+      background: var(--bg-2); color: var(--ink-2); padding: 24px;
+      border-top: 1px solid var(--line-soft); font-size: 12px; text-align: center;
     }
+    footer .foot-links { display: flex; gap: 20px; justify-content: center; margin-bottom: 12px; flex-wrap: wrap; }
+    footer .foot-links a { color: var(--ink-2); text-decoration: none; }
+    footer .foot-links a:hover { text-decoration: underline; }
     footer kbd {
-      background: #4a5568; color: #e2e8f0; padding: 2px 6px;
-      border-radius: 3px; font-size: 0.8rem;
+      background: var(--bg); color: var(--ink); padding: 1px 6px;
+      border: 1px solid var(--line); border-radius: 4px; font-family: inherit; font-size: 12px;
     }
 
-    /* Page headings */
-    .page-header { margin-bottom: 28px; }
-    .page-header h1 { font-size: 1.6rem; font-weight: 700; color: #1a202c; }
-    .page-header p { color: #718096; margin-top: 4px; font-size: 0.95rem; }
+    /* Breadcrumb */
+    .breadcrumb { font-size: 14px; color: var(--ink-2); margin-bottom: 16px; text-align: center; }
+    .breadcrumb a { color: var(--blue); text-decoration: none; }
+    .breadcrumb a:hover { text-decoration: underline; }
 
-    /* Metric cards */
-    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
-    .metric-card {
-      background: white; border: 1px solid #e2e8f0; border-radius: 8px;
-      padding: 20px 24px; cursor: pointer; transition: box-shadow 0.15s, border-color 0.15s;
-    }
-    .metric-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-color: #bee3f8; }
-    .metric-card .value { font-size: 2rem; font-weight: 700; color: #2b6cb0; line-height: 1; }
-    .metric-card .label { font-size: 0.8rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 6px; }
-    .metric-card .delta { font-size: 0.8rem; color: #48bb78; margin-top: 4px; }
-    .metric-card .delta.down { color: #fc8181; }
-
-    /* Cards / panels */
-    .card {
-      background: white; border: 1px solid #e2e8f0; border-radius: 8px;
-      padding: 24px; margin-bottom: 24px;
-    }
-    .card h2 { font-size: 1rem; font-weight: 600; color: #2d3748; margin-bottom: 16px; }
-
-    /* Tables */
-    .data-table { width: 100%; border-collapse: collapse; }
-    .data-table th {
-      padding: 10px 14px; text-align: left; font-size: 0.75rem;
-      text-transform: uppercase; letter-spacing: 0.05em; color: #718096;
-      border-bottom: 2px solid #e2e8f0; background: #f7fafc;
-    }
-    .data-table td { padding: 12px 14px; border-bottom: 1px solid #edf2f7; font-size: 0.9rem; }
-    .data-table tbody tr { cursor: pointer; transition: background 0.1s; }
-    .data-table tbody tr:hover { background: #ebf8ff; }
-    .data-table tbody tr:last-child td { border-bottom: none; }
+    /* Hero */
+    .hero { text-align: center; padding: 16px 0 40px; }
+    .hero h1 { font-size: 64px; font-weight: 600; line-height: 1.05; letter-spacing: -0.005em; color: var(--ink); }
+    .hero-sub { font-size: 24px; line-height: 1.33; color: var(--ink-2); margin: 12px auto 28px; max-width: 640px; letter-spacing: 0.011em; }
+    .btn-row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; align-items: center; }
 
     /* Buttons */
     .btn {
-      display: inline-block; padding: 9px 20px; border-radius: 5px;
-      font-size: 0.9rem; cursor: pointer; border: none; font-family: inherit;
-      font-weight: 500; transition: background 0.15s;
+      display: inline-block; padding: 11px 22px; border-radius: 980px;
+      font-size: 17px; cursor: pointer; border: none; font-family: inherit;
+      letter-spacing: -0.01em; transition: background 0.2s; text-decoration: none;
     }
-    .btn-primary { background: #2b6cb0; color: white; }
-    .btn-primary:hover { background: #2c5282; }
-    .btn-secondary { background: white; color: #2b6cb0; border: 1.5px solid #bee3f8; }
-    .btn-secondary:hover { background: #ebf8ff; }
-    .btn-danger { background: #fff5f5; color: #c53030; border: 1.5px solid #fed7d7; }
-    .btn-danger:hover { background: #fed7d7; }
-    .btn-sm { padding: 5px 12px; font-size: 0.8rem; }
-    .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .btn-primary { background: var(--blue-btn); color: #fff; }
+    .btn-primary:hover { background: var(--blue-btn-hover); }
+    .btn-secondary { background: transparent; color: var(--blue); padding-left: 8px; padding-right: 8px; }
+    .btn-secondary:hover { text-decoration: underline; }
 
-    /* Tags / badges */
-    .tag {
-      display: inline-block; padding: 2px 8px; border-radius: 20px;
-      font-size: 0.75rem; font-weight: 500;
+    /* Product tiles */
+    .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    .tile {
+      background: var(--bg-2); border-radius: 18px; padding: 48px 32px; text-align: center;
+      cursor: pointer; transition: background 0.2s;
     }
-    .tag-green { background: #c6f6d5; color: #276749; }
-    .tag-blue  { background: #bee3f8; color: #2b6cb0; }
-    .tag-amber { background: #fefcbf; color: #975a16; }
-    .tag-red   { background: #fed7d7; color: #9b2c2c; }
-    .tag-grey  { background: #e2e8f0; color: #4a5568; }
+    .tile:hover { background: var(--line-soft); }
+    .tile h2 { font-size: 40px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); margin-bottom: 8px; }
+    .tile p { color: var(--ink-2); font-size: 21px; line-height: 1.38; margin-bottom: 18px; }
+    .tile .btn-row { gap: 16px; }
 
-    /* Filter chips */
-    .filter-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+    /* Feature bands */
+    .band {
+      border-radius: 18px; padding: 56px 32px; text-align: center; margin-bottom: 16px; background: var(--bg-2);
+    }
+    .band h2 { font-size: 48px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); margin-bottom: 12px; }
+    .band p { font-size: 21px; line-height: 1.38; color: var(--ink-2); margin-bottom: 22px; max-width: 720px; margin-left: auto; margin-right: auto; }
+    .band-dark { background: #000; }
+    .band-dark h2 { color: #f5f5f7; }
+    .band-dark p { color: #a1a1a6; }
+    .band-dark a { color: #2997ff; }
+
+    /* Three small feature cards */
+    .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px; }
+    .feature {
+      background: var(--bg-2); border-radius: 18px; padding: 32px 28px;
+    }
+    .feature h3 { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 8px; }
+    .feature p { color: var(--ink-2); font-size: 17px; line-height: 1.45; margin-bottom: 14px; }
+    .feature a { font-size: 17px; text-decoration: none; }
+    .feature a:hover { text-decoration: underline; }
+
+    /* Colour / finish chips */
+    .chips { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 8px 0 24px; }
     .chip {
-      padding: 5px 14px; border-radius: 20px; font-size: 0.85rem; cursor: pointer;
-      border: 1.5px solid #e2e8f0; background: white; color: #4a5568;
-      transition: all 0.15s; user-select: none;
+      padding: 8px 18px; border-radius: 980px; font-size: 15px; cursor: pointer;
+      border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+      transition: all 0.2s; user-select: none;
     }
-    .chip:hover { border-color: #4299e1; color: #2b6cb0; }
-    .chip.active { background: #2b6cb0; border-color: #2b6cb0; color: white; }
-
-    /* Breadcrumb */
-    .breadcrumb { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: #718096; margin-bottom: 20px; }
-    .breadcrumb a { color: #4299e1; text-decoration: none; }
-    .breadcrumb a:hover { text-decoration: underline; }
-    .breadcrumb span { color: #a0aec0; }
-
-    /* Chart placeholder */
-    .chart-placeholder {
-      background: linear-gradient(135deg, #ebf8ff 0%, #e0f2fe 100%);
-      border: 1px dashed #90cdf4; border-radius: 6px;
-      height: 280px; display: flex; align-items: center; justify-content: center;
-      color: #4299e1; font-size: 0.9rem; cursor: pointer;
-    }
-    .chart-placeholder:hover { background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); }
-
-    /* Settings rows */
-    .settings-row {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 14px 0; border-bottom: 1px solid #edf2f7;
-    }
-    .settings-row:last-child { border-bottom: none; }
-    .settings-row .info h4 { font-size: 0.9rem; font-weight: 500; }
-    .settings-row .info p { font-size: 0.8rem; color: #718096; margin-top: 2px; }
-    .toggle {
-      width: 40px; height: 22px; background: #48bb78; border-radius: 11px;
-      cursor: pointer; position: relative; transition: background 0.2s; flex-shrink: 0;
-    }
-    .toggle.off { background: #cbd5e0; }
-    .toggle::after {
-      content: ''; position: absolute; top: 3px; left: 3px;
-      width: 16px; height: 16px; background: white; border-radius: 50%;
-      transition: transform 0.2s;
-    }
-    .toggle.off::after { transform: none; }
-    .toggle:not(.off)::after { transform: translateX(18px); }
+    .chip:hover { border-color: var(--ink-2); }
+    .chip.active { background: var(--ink); border-color: var(--ink); color: var(--bg); }
 
     /* Spacer for scroll depth testing */
     .spacer {
-      height: 480px; background: linear-gradient(to bottom, #ebf8ff, #e0f2fe);
-      border-radius: 8px; display: flex; align-items: center; justify-content: center;
-      color: #4299e1; font-size: 0.9rem; margin: 24px 0;
-      border: 1px solid #bee3f8;
+      height: 420px; background: var(--bg-2); border-radius: 18px;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--ink-2); font-size: 17px; margin: 16px 0;
     }
 
-    /* Section divider */
-    .section-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-    .section-row h2 { font-size: 1rem; font-weight: 600; color: #2d3748; }
-
-    /* Danger zone */
-    .danger-zone { border: 1px solid #fed7d7; border-radius: 8px; padding: 20px; }
-    .danger-zone h3 { color: #c53030; font-size: 0.9rem; margin-bottom: 12px; }
-
-    /* Profile field */
-    .profile-field { padding: 12px 0; border-bottom: 1px solid #edf2f7; }
-    .profile-field:last-child { border-bottom: none; }
-    .profile-field label { display: block; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: #718096; margin-bottom: 4px; }
-    .profile-field .value { font-size: 0.95rem; color: #2d3748; }
-    .profile-field .edit-link { font-size: 0.8rem; color: #4299e1; cursor: pointer; float: right; }
-    .profile-field .edit-link:hover { text-decoration: underline; }
+    /* Phone sizes */
+    @media (max-width: 820px) {
+      nav { gap: 16px; }
+      .hero h1 { font-size: 48px; }
+      .features { grid-template-columns: 1fr; }
+      .band h2 { font-size: 36px; }
+    }
+    @media (max-width: 520px) {
+      header { height: auto; padding: 10px 16px; flex-wrap: wrap; row-gap: 8px; }
+      nav { order: 3; width: 100%; justify-content: space-around; gap: 8px; flex: none; }
+      .logo { font-size: 15px; }
+      nav a { font-size: 12px; }
+      main { padding: 28px 16px 56px; }
+      .hero h1 { font-size: 40px; }
+      .hero-sub { font-size: 19px; }
+      .tiles { grid-template-columns: 1fr; }
+      .tile h2 { font-size: 32px; }
+      .band { padding: 40px 20px; }
+      .band h2 { font-size: 32px; }
+      .band p { font-size: 19px; }
+    }
   </style>
 </head>
 <body>
 
   <header>
-    <div class="logo">DemoApp</div>
+    <a href="/" class="logo" data-ut-label="DemoApp logo">DemoApp</a>
     <nav id="nav">
-      <a href="/" data-ut-label="Dashboard nav">Dashboard</a>
-      <a href="/reports" data-ut-label="Reports nav">Reports</a>
-      <a href="/settings" data-ut-label="Settings nav">Settings</a>
+      <a href="/" data-ut-label="Home nav">Home</a>
+      <a href="/phone" data-ut-label="DemoPhone nav">DemoPhone</a>
+      <a href="/pad" data-ut-label="DemoPad nav">DemoPad</a>
     </nav>
     <button id="open-recap" type="button">Open Recap panel</button>
   </header>
@@ -190,6 +177,11 @@
   <main id="app"><!-- content renders here --></main>
 
   <footer>
+    <div class="foot-links">
+      <a href="/" data-ut-label="Footer Home link">Home</a>
+      <a href="/phone" data-ut-label="Footer DemoPhone link">DemoPhone</a>
+      <a href="/pad" data-ut-label="Footer DemoPad link">DemoPad</a>
+    </div>
     <p>DemoApp — Recap UX Demo &nbsp;·&nbsp; Press <kbd>Alt+Shift+Y</kbd> (or hold 3 fingers for 1.5s on touch) to open the researcher panel</p>
   </footer>
 
@@ -200,357 +192,176 @@
 
     // ── Page content ───────────────────────────────────────────────────────────
 
-    function pageDashboard() {
+    function pageHome() {
       return `
-        <div class="page-header">
-          <h1>Dashboard</h1>
-          <p>Welcome back. Here's what's happening with your prototype today.</p>
-        </div>
+        <section class="hero">
+          <h1>DemoApp.</h1>
+          <p class="hero-sub">Two new ways to work, play and stay in touch. Pick the one that fits your day.</p>
+        </section>
 
-        <div class="metrics">
-          <div class="metric-card" data-ut-label="Sessions metric">
-            <div class="value">1,284</div>
-            <div class="label">Total Sessions</div>
-            <div class="delta">↑ 12% this week</div>
+        <div class="tiles">
+          <div class="tile" data-href="/phone" data-ut-label="DemoPhone tile">
+            <h2>DemoPhone</h2>
+            <p>Pocket-sized power with a camera that keeps up.</p>
+            <div class="btn-row">
+              <a href="/phone" class="btn btn-primary" data-ut-label="DemoPhone buy CTA">Buy</a>
+              <a href="/phone" class="btn btn-secondary" data-ut-label="DemoPhone learn more link">Learn more ›</a>
+            </div>
           </div>
-          <div class="metric-card" data-ut-label="Reports metric">
-            <div class="value">38</div>
-            <div class="label">Reports Generated</div>
-            <div class="delta">↑ 4 new today</div>
+          <div class="tile" data-href="/pad" data-ut-label="DemoPad tile">
+            <h2>DemoPad</h2>
+            <p>A bigger screen for drawing, reading and planning.</p>
+            <div class="btn-row">
+              <a href="/pad" class="btn btn-primary" data-ut-label="DemoPad buy CTA">Buy</a>
+              <a href="/pad" class="btn btn-secondary" data-ut-label="DemoPad learn more link">Learn more ›</a>
+            </div>
           </div>
-          <div class="metric-card" data-ut-label="Users metric">
-            <div class="value">94</div>
-            <div class="label">Active Users</div>
-            <div class="delta down">↓ 3% vs last week</div>
-          </div>
-          <div class="metric-card" data-ut-label="Duration metric">
-            <div class="value">3m 42s</div>
-            <div class="label">Avg. Session Duration</div>
-            <div class="delta">↑ 8s improvement</div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="section-row">
-            <h2>Recent Reports</h2>
-            <a href="/reports" class="btn btn-secondary btn-sm" data-ut-label="View all reports">View all</a>
-          </div>
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Report name</th>
-                <th>Created</th>
-                <th>Sessions</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr data-href="/reports/detail" data-ut-label="Report row: Q1 Performance">
-                <td>Q1 Performance Report</td><td>Today, 9:14am</td><td>124</td>
-                <td><span class="tag tag-green">Complete</span></td>
-              </tr>
-              <tr data-href="/reports/detail" data-ut-label="Report row: Onboarding Flow">
-                <td>Onboarding Flow Analysis</td><td>Yesterday</td><td>89</td>
-                <td><span class="tag tag-blue">In review</span></td>
-              </tr>
-              <tr data-href="/reports/detail" data-ut-label="Report row: Mobile Checkout">
-                <td>Mobile Checkout Usability</td><td>Apr 12</td><td>67</td>
-                <td><span class="tag tag-amber">Draft</span></td>
-              </tr>
-              <tr data-href="/reports/detail" data-ut-label="Report row: Navigation Patterns">
-                <td>Navigation Patterns</td><td>Apr 10</td><td>201</td>
-                <td><span class="tag tag-green">Complete</span></td>
-              </tr>
-            </tbody>
-          </table>
         </div>
 
         <div class="spacer">↓ Scroll to test scroll depth tracking</div>
 
-        <div class="card">
-          <h2>Quick Actions</h2>
+        <section class="band band-dark">
+          <h2>Find the right one.</h2>
+          <p>Compare sizes, batteries and cameras side by side. Not sure? <a href="/pad" data-ut-label="Compare link">See how DemoPad compares ›</a></p>
           <div class="btn-row">
-            <a href="/reports" class="btn btn-primary" data-ut-label="Create new report CTA">Create Report</a>
-            <a href="/settings" class="btn btn-secondary" data-ut-label="Manage team CTA">Manage Settings</a>
+            <a href="/phone" class="btn btn-primary" data-ut-label="Compare DemoPhone CTA">Compare DemoPhone</a>
+            <a href="/pad" class="btn btn-secondary" data-ut-label="Compare DemoPad link" style="color:#2997ff">Compare DemoPad ›</a>
           </div>
-        </div>
+        </section>
 
-        <div class="spacer">↓ 75% scroll mark — footer content below</div>
-
-        <div class="card">
-          <h2>Usage This Month</h2>
-          <div class="chart-placeholder" data-ut-label="Usage chart">📊 &nbsp; Chart visualisation — click to expand</div>
+        <div class="features">
+          <div class="feature" data-ut-label="Battery feature">
+            <h3>All-day battery.</h3>
+            <p>Enough power for a full day of messages, maps and photos.</p>
+            <a href="/phone" data-ut-label="Battery feature link">Read more ›</a>
+          </div>
+          <div class="feature" data-ut-label="Privacy feature">
+            <h3>Private by design.</h3>
+            <p>Your data stays on your device unless you choose to share it.</p>
+            <a href="/pad" data-ut-label="Privacy feature link">Read more ›</a>
+          </div>
+          <div class="feature" data-ut-label="Accessories feature">
+            <h3>Works together.</h3>
+            <p>Move between DemoPhone and DemoPad without missing a beat.</p>
+            <a href="/pad" data-ut-label="Accessories feature link">Read more ›</a>
+          </div>
         </div>
       `;
     }
 
-    function pageReports() {
+    function pagePhone() {
       return `
-        <div class="page-header">
-          <h1>Reports</h1>
-          <p>All usability reports for your prototype sessions.</p>
-        </div>
+        <div class="breadcrumb"><a href="/" data-ut-label="Phone breadcrumb home">Home</a> › DemoPhone</div>
 
-        <div class="card">
-          <div class="section-row">
-            <div class="filter-bar" style="margin:0">
-              <div class="chip active" data-ut-label="Filter: All time">All time</div>
-              <div class="chip" data-ut-label="Filter: Last 7 days">Last 7 days</div>
-              <div class="chip" data-ut-label="Filter: Last 30 days">Last 30 days</div>
-              <div class="chip" data-ut-label="Filter: Custom range">Custom range</div>
-            </div>
-            <button class="btn btn-primary btn-sm" data-ut-label="New report button">+ New Report</button>
+        <section class="hero">
+          <h1>DemoPhone.</h1>
+          <p class="hero-sub">A bigger screen, a better camera and all-day battery. Pocket-sized, still.</p>
+          <div class="btn-row">
+            <a href="/phone" class="btn btn-primary" data-ut-label="Phone buy CTA">Buy</a>
+            <a href="/pad" class="btn btn-secondary" data-ut-label="Phone compare link">Compare with DemoPad ›</a>
           </div>
+        </section>
+
+        <div class="chips" data-ut-label="Finish picker">
+          <span class="chip active" data-ut-label="Finish Midnight">Midnight</span>
+          <span class="chip" data-ut-label="Finish Silver">Silver</span>
+          <span class="chip" data-ut-label="Finish Blue">Blue</span>
         </div>
 
-        <div class="card">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Report name</th>
-                <th>Date</th>
-                <th>Sessions</th>
-                <th>Avg. duration</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr data-href="/reports/detail" data-ut-label="Report: Q1 Performance">
-                <td><strong>Q1 Performance Report</strong></td><td>Apr 16, 2026</td><td>124</td><td>3m 42s</td>
-                <td><span class="tag tag-green">Complete</span></td>
-              </tr>
-              <tr data-href="/reports/detail" data-ut-label="Report: Onboarding Flow">
-                <td><strong>Onboarding Flow Analysis</strong></td><td>Apr 15, 2026</td><td>89</td><td>6m 10s</td>
-                <td><span class="tag tag-blue">In review</span></td>
-              </tr>
-              <tr data-href="/reports/detail" data-ut-label="Report: Mobile Checkout">
-                <td><strong>Mobile Checkout Usability</strong></td><td>Apr 12, 2026</td><td>67</td><td>4m 55s</td>
-                <td><span class="tag tag-amber">Draft</span></td>
-              </tr>
-              <tr data-href="/reports/detail" data-ut-label="Report: Navigation Patterns">
-                <td><strong>Navigation Patterns</strong></td><td>Apr 10, 2026</td><td>201</td><td>2m 18s</td>
-                <td><span class="tag tag-green">Complete</span></td>
-              </tr>
-              <tr data-href="/reports/detail" data-ut-label="Report: Signup Funnel">
-                <td><strong>Signup Funnel Drop-off</strong></td><td>Apr 8, 2026</td><td>312</td><td>1m 47s</td>
-                <td><span class="tag tag-green">Complete</span></td>
-              </tr>
-              <tr data-href="/reports/detail" data-ut-label="Report: Settings Discoverability">
-                <td><strong>Settings Discoverability</strong></td><td>Apr 5, 2026</td><td>44</td><td>5m 02s</td>
-                <td><span class="tag tag-grey">Archived</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <section class="band">
+          <h2>The camera.</h2>
+          <p>Sharper photos in low light, and a zoom that stays crisp. Everything you need, without carrying a second camera.</p>
+          <a href="/pad" class="btn btn-secondary" data-ut-label="Camera see DemoPad link">See how DemoPad captures ›</a>
+        </section>
 
-        <div class="spacer">↓ Scroll to see older reports</div>
+        <div class="spacer">↓ Scroll to test scroll depth tracking</div>
 
-        <div class="card">
-          <h2>Archived Reports (Q3 2025)</h2>
-          <table class="data-table">
-            <thead>
-              <tr><th>Report name</th><th>Date</th><th>Sessions</th><th>Status</th></tr>
-            </thead>
-            <tbody>
-              <tr data-href="/reports/detail" data-ut-label="Report: Homepage Redesign">
-                <td>Homepage Redesign Test</td><td>Sep 14, 2025</td><td>58</td>
-                <td><span class="tag tag-grey">Archived</span></td>
-              </tr>
-              <tr data-href="/reports/detail" data-ut-label="Report: Search UX">
-                <td>Search UX Evaluation</td><td>Sep 2, 2025</td><td>73</td>
-                <td><span class="tag tag-grey">Archived</span></td>
-              </tr>
-            </tbody>
-          </table>
+        <section class="band band-dark">
+          <h2>All-day battery.</h2>
+          <p>From the morning commute to the last photo of the evening, DemoPhone keeps going.</p>
+          <div class="btn-row">
+            <a href="/" class="btn btn-secondary" data-ut-label="Battery back to home link" style="color:#2997ff">Back to home ›</a>
+          </div>
+        </section>
+
+        <div class="features">
+          <div class="feature" data-ut-label="Phone storage feature">
+            <h3>Storage.</h3>
+            <p>Choose the space that suits how you use your phone.</p>
+            <a href="/" data-ut-label="Storage feature link">Compare sizes ›</a>
+          </div>
+          <div class="feature" data-ut-label="Phone privacy feature">
+            <h3>Privacy.</h3>
+            <p>Control what you share, and when.</p>
+            <a href="/pad" data-ut-label="Phone privacy feature link">Read more ›</a>
+          </div>
+          <div class="feature" data-ut-label="Phone accessories feature">
+            <h3>Accessories.</h3>
+            <p>Cases, chargers and straps, made to fit.</p>
+            <a href="/" data-ut-label="Phone accessories feature link">Shop accessories ›</a>
+          </div>
         </div>
       `;
     }
 
-    function pageReportDetail() {
+    function pagePad() {
       return `
-        <div class="breadcrumb">
-          <a href="/reports" data-ut-label="Breadcrumb: Reports">Reports</a>
-          <span>›</span>
-          <span>Q1 Performance Report</span>
+        <div class="breadcrumb"><a href="/" data-ut-label="Pad breadcrumb home">Home</a> › DemoPad</div>
+
+        <section class="hero">
+          <h1>DemoPad.</h1>
+          <p class="hero-sub">A bigger canvas for drawing, reading and planning. Light enough to take anywhere.</p>
+          <div class="btn-row">
+            <a href="/pad" class="btn btn-primary" data-ut-label="Pad buy CTA">Buy</a>
+            <a href="/phone" class="btn btn-secondary" data-ut-label="Pad compare link">Compare with DemoPhone ›</a>
+          </div>
+        </section>
+
+        <div class="chips" data-ut-label="Size picker">
+          <span class="chip" data-ut-label="Size Compact">Compact</span>
+          <span class="chip active" data-ut-label="Size Standard">Standard</span>
+          <span class="chip" data-ut-label="Size Large">Large</span>
         </div>
 
-        <div class="page-header">
-          <h1>Q1 Performance Report</h1>
-          <p>Usability testing results · 124 sessions · Apr 16, 2026</p>
-        </div>
+        <section class="band">
+          <h2>The display.</h2>
+          <p>A large, bright screen with true-to-life colour. Everything looks as it should, whether you are sketching or reading.</p>
+          <a href="/phone" class="btn btn-secondary" data-ut-label="Display see DemoPhone link">See the DemoPhone screen ›</a>
+        </section>
 
-        <div class="metrics" style="grid-template-columns: repeat(4, 1fr)">
-          <div class="metric-card" data-ut-label="Report stat: Sessions">
-            <div class="value">124</div>
-            <div class="label">Sessions</div>
-          </div>
-          <div class="metric-card" data-ut-label="Report stat: Avg duration">
-            <div class="value">3m 42s</div>
-            <div class="label">Avg. Duration</div>
-          </div>
-          <div class="metric-card" data-ut-label="Report stat: Task success">
-            <div class="value">78%</div>
-            <div class="label">Task Success</div>
-            <div class="delta">↑ 6% vs previous</div>
-          </div>
-          <div class="metric-card" data-ut-label="Report stat: Satisfaction">
-            <div class="value">4.2</div>
-            <div class="label">Satisfaction /5</div>
-          </div>
-        </div>
+        <div class="spacer">↓ Scroll to test scroll depth tracking</div>
 
-        <div class="card">
-          <div class="section-row">
-            <h2>Click Heatmap</h2>
-            <div class="btn-row">
-              <button class="btn btn-secondary btn-sm" data-ut-label="Export report">Export</button>
-              <button class="btn btn-secondary btn-sm" data-ut-label="Share report">Share</button>
-            </div>
+        <section class="band band-dark">
+          <h2>Built to carry.</h2>
+          <p>Under a kilogram, with a slim body that slips into any bag.</p>
+          <div class="btn-row">
+            <a href="/" class="btn btn-secondary" data-ut-label="Carry back to home link" style="color:#2997ff">Back to home ›</a>
           </div>
-          <div class="chart-placeholder" style="height:320px" data-ut-label="Heatmap visualisation">
-            🔥 &nbsp; Click heatmap — 124 sessions overlaid
-          </div>
-        </div>
+        </section>
 
-        <div class="card">
-          <h2>Session Recordings</h2>
-          <table class="data-table">
-            <thead>
-              <tr><th>Participant</th><th>Duration</th><th>Pages visited</th><th>Task outcome</th></tr>
-            </thead>
-            <tbody>
-              <tr data-ut-label="Session: P01"><td>Participant 01</td><td>4m 12s</td><td>6</td><td><span class="tag tag-green">Success</span></td></tr>
-              <tr data-ut-label="Session: P02"><td>Participant 02</td><td>2m 58s</td><td>4</td><td><span class="tag tag-green">Success</span></td></tr>
-              <tr data-ut-label="Session: P03"><td>Participant 03</td><td>6m 44s</td><td>9</td><td><span class="tag tag-amber">Partial</span></td></tr>
-              <tr data-ut-label="Session: P04"><td>Participant 04</td><td>1m 33s</td><td>3</td><td><span class="tag tag-red">Abandoned</span></td></tr>
-              <tr data-ut-label="Session: P05"><td>Participant 05</td><td>3m 20s</td><td>5</td><td><span class="tag tag-green">Success</span></td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="spacer">↓ Findings and recommendations below</div>
-
-        <div class="card">
-          <h2>Key Findings</h2>
-          <p style="color:#4a5568;line-height:1.7;margin-bottom:12px">
-            78% of participants successfully completed the primary task, up from 72% in the previous round.
-            The main friction point remains the filter panel on the reports list — 3 of 5 participants
-            attempted to use the search bar before finding the filter chips.
-          </p>
-          <p style="color:#4a5568;line-height:1.7">
-            Participants who visited the Settings page before completing the task took on average 40% longer,
-            suggesting the settings navigation may be drawing attention away from the primary flow.
-          </p>
-        </div>
-
-        <div style="margin-top: 8px">
-          <a href="/reports" class="btn btn-secondary" data-ut-label="Back to reports">← Back to Reports</a>
-        </div>
-      `;
-    }
-
-    function pageSettings() {
-      return `
-        <div class="page-header">
-          <h1>Settings</h1>
-          <p>Manage your account preferences and team configuration.</p>
-        </div>
-
-        <div class="card">
-          <h2>Profile</h2>
-          <div class="profile-field">
-            <label>Full name</label>
-            <div class="value">Alex Johnson <span class="edit-link" data-ut-label="Edit name">Edit</span></div>
+        <div class="features">
+          <div class="feature" data-ut-label="Pad drawing feature">
+            <h3>Drawing.</h3>
+            <p>Sketch notes and mark up documents with a stylus.</p>
+            <a href="/pad" data-ut-label="Drawing feature link">Read more ›</a>
           </div>
-          <div class="profile-field">
-            <label>Email address</label>
-            <div class="value">alex@demoapp.io <span class="edit-link" data-ut-label="Edit email">Edit</span></div>
+          <div class="feature" data-ut-label="Pad reading feature">
+            <h3>Reading.</h3>
+            <p>Comfortable on the eyes for long sessions.</p>
+            <a href="/phone" data-ut-label="Reading feature link">Pair with DemoPhone ›</a>
           </div>
-          <div class="profile-field">
-            <label>Role</label>
-            <div class="value">UX Researcher</div>
-          </div>
-          <div class="profile-field">
-            <label>Organisation</label>
-            <div class="value">DemoApp Ltd <span class="edit-link" data-ut-label="Edit org">Edit</span></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h2>Notifications</h2>
-          <div class="settings-row">
-            <div class="info">
-              <h4>Report completed</h4>
-              <p>Get notified when a usability report is ready to review</p>
-            </div>
-            <div class="toggle" data-ut-label="Toggle: Report completed"></div>
-          </div>
-          <div class="settings-row">
-            <div class="info">
-              <h4>New session recorded</h4>
-              <p>Alert when a participant completes a session</p>
-            </div>
-            <div class="toggle" data-ut-label="Toggle: New session"></div>
-          </div>
-          <div class="settings-row">
-            <div class="info">
-              <h4>Weekly digest</h4>
-              <p>Summary of activity across all your prototypes</p>
-            </div>
-            <div class="toggle off" data-ut-label="Toggle: Weekly digest"></div>
-          </div>
-          <div class="settings-row">
-            <div class="info">
-              <h4>Team activity</h4>
-              <p>Notify when teammates add comments or edit reports</p>
-            </div>
-            <div class="toggle off" data-ut-label="Toggle: Team activity"></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h2>Integrations</h2>
-          <div class="settings-row">
-            <div class="info">
-              <h4>Figma</h4>
-              <p>Link prototypes directly from your Figma workspace</p>
-            </div>
-            <button class="btn btn-secondary btn-sm" data-ut-label="Connect Figma">Connect</button>
-          </div>
-          <div class="settings-row">
-            <div class="info">
-              <h4>Slack</h4>
-              <p>Post report summaries to a Slack channel</p>
-            </div>
-            <button class="btn btn-secondary btn-sm" data-ut-label="Connect Slack">Connect</button>
-          </div>
-        </div>
-
-        <div style="margin-bottom: 24px">
-          <button class="btn btn-primary" data-ut-label="Save settings">Save changes</button>
-        </div>
-
-        <div class="danger-zone">
-          <h3>Danger Zone</h3>
-          <div class="settings-row" style="border:none;padding-top:0">
-            <div class="info">
-              <h4>Delete account</h4>
-              <p>Permanently remove your account and all associated data</p>
-            </div>
-            <button class="btn btn-danger btn-sm" data-ut-label="Delete account">Delete account</button>
+          <div class="feature" data-ut-label="Pad planning feature">
+            <h3>Planning.</h3>
+            <p>Your week on one screen, synced to your phone.</p>
+            <a href="/phone" data-ut-label="Planning feature link">See how it syncs ›</a>
           </div>
         </div>
       `;
     }
 
-    // ── Router ─────────────────────────────────────────────────────────────────
+    const PAGES = { '/': pageHome, '/phone': pagePhone, '/pad': pagePad };
 
-    const PAGES = {
-      '/':               pageDashboard,
-      '/reports':        pageReports,
-      '/reports/detail': pageReportDetail,
-      '/settings':       pageSettings,
-    };
+    // ── Routing ────────────────────────────────────────────────────────────────
 
     function renderPage(path) {
       const render = PAGES[path] ?? PAGES['/'];
@@ -559,29 +370,25 @@
       // Update active nav link
       document.querySelectorAll('#nav a').forEach(a => {
         const href = new URL(a.href).pathname;
-        const isActive = path === href || (href !== '/' && path.startsWith(href));
-        a.classList.toggle('active', isActive);
+        a.classList.toggle('active', href === path);
       });
 
-      // Wire up table row clicks (data-href attribute)
-      document.querySelectorAll('[data-href]').forEach(row => {
-        row.addEventListener('click', (e) => {
+      // Tiles and rows navigate when clicked anywhere (inner links handled by the router)
+      document.querySelectorAll('[data-href]').forEach(el => {
+        el.addEventListener('click', (e) => {
           if (e.target.closest('a, button')) return;
-          navigate(row.dataset.href);
+          navigate(el.dataset.href);
         });
       });
 
-      // Wire up chip toggle (purely visual)
-      document.querySelectorAll('.chip').forEach(chip => {
-        chip.addEventListener('click', () => {
-          chip.closest('.filter-bar')?.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
-          chip.classList.add('active');
+      // Finish and size pickers (purely visual)
+      document.querySelectorAll('.chips').forEach(group => {
+        group.querySelectorAll('.chip').forEach(chip => {
+          chip.addEventListener('click', () => {
+            group.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+            chip.classList.add('active');
+          });
         });
-      });
-
-      // Wire up notification toggles (purely visual)
-      document.querySelectorAll('.toggle').forEach(toggle => {
-        toggle.addEventListener('click', () => toggle.classList.toggle('off'));
       });
 
       window.scrollTo(0, 0);
