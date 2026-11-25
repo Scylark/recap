@@ -396,11 +396,13 @@
     // links in the content and footer never jump away. Recap's own panel is left alone.
     document.addEventListener('click', (e) => {
       const a = e.target.closest('a[href]');
-      if (!a || a.closest('.recap-panel-root')) return;
-      e.preventDefault();
-      if (!a.closest('#nav')) return;
+      // Leave Recap's panel alone, and leave download links (the panel's exports) alone,
+      // otherwise the browser never gets to save the file.
+      if (!a || a.closest('.recap-panel-root') || a.hasAttribute('download')) return;
       const url = new URL(a.href, location.origin);
-      if (url.origin !== location.origin) return;
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+      e.preventDefault();
+      if (!a.closest('#nav') || url.origin !== location.origin) return;
       navigate(url.pathname);
     });
 
