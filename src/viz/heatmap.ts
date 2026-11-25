@@ -79,7 +79,8 @@ function handleScroll(): void {
   _scrollScheduled = true;
   requestAnimationFrame(() => {
     _scrollScheduled = false;
-    renderHeatmap(_clicks);
+    // Keep the active visit filter; a scroll must not widen the view to every visit.
+    renderHeatmap(_clicks, _filter ?? undefined);
   });
 }
 

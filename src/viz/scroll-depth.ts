@@ -71,31 +71,22 @@ export function initScrollDepthOverlay(): void {
 export function updateScrollDepthOverlay(events: ScrollEvent[]): void {
   if (!_overlay || !_marker || !_label) return;
 
-  if (events.length === 0) {
+  // While the view is on it stays on, across page changes and visit filters, until
+  // it is switched off. A page with no scroll data shows 0%.
+  if (!_isVisible) {
     _overlay.style.opacity = '0';
     _marker.style.display = 'none';
     _label.style.display = 'none';
     return;
   }
 
-  // Group by URL, get max depth per page
-  const byUrl = new Map<string, number>();
-  for (const e of events) {
-    const prev = byUrl.get(e.url) ?? 0;
-    if (e.maxDepth > prev) byUrl.set(e.url, e.maxDepth);
-  }
-
-  // Use current page depth only — no cross-page fallback
+  // Current page only, with no cross-page fallback
   const currentUrl = location.pathname;
-  const depth = byUrl.get(currentUrl) ?? 0;
-
-  if (depth === 0) {
-    _marker.style.display = 'none';
-    _label.style.display = 'none';
-    return;
+  let depth = 0;
+  for (const e of events) {
+    if (e.url === currentUrl && e.maxDepth > depth) depth = e.maxDepth;
   }
 
-  // Position marker and label at depth%
   const markerY = (depth / 100) * window.innerHeight;
   const clampedY = Math.min(Math.max(0, markerY), window.innerHeight - 3);
 
@@ -104,6 +95,8 @@ export function updateScrollDepthOverlay(events: ScrollEvent[]): void {
   _label.textContent = `◄ ${depth}%`;
   _marker.style.display = 'block';
   _label.style.display = 'block';
+  _overlay.style.display = 'block';
+  _overlay.style.opacity = '0.75';
 }
 
 export function showScrollDepthOverlay(events: ScrollEvent[]): void {

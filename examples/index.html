@@ -200,7 +200,7 @@
         </section>
 
         <div class="tiles">
-          <div class="tile" data-href="/phone" data-ut-label="DemoPhone tile">
+          <div class="tile" data-ut-label="DemoPhone tile">
             <h2>DemoPhone</h2>
             <p>Pocket-sized power with a camera that keeps up.</p>
             <div class="btn-row">
@@ -208,7 +208,7 @@
               <a href="/phone" class="btn btn-secondary" data-ut-label="DemoPhone learn more link">Learn more ›</a>
             </div>
           </div>
-          <div class="tile" data-href="/pad" data-ut-label="DemoPad tile">
+          <div class="tile" data-ut-label="DemoPad tile">
             <h2>DemoPad</h2>
             <p>A bigger screen for drawing, reading and planning.</p>
             <div class="btn-row">
@@ -373,14 +373,6 @@
         a.classList.toggle('active', href === path);
       });
 
-      // Tiles and rows navigate when clicked anywhere (inner links handled by the router)
-      document.querySelectorAll('[data-href]').forEach(el => {
-        el.addEventListener('click', (e) => {
-          if (e.target.closest('a, button')) return;
-          navigate(el.dataset.href);
-        });
-      });
-
       // Finish and size pickers (purely visual)
       document.querySelectorAll('.chips').forEach(group => {
         group.querySelectorAll('.chip').forEach(chip => {
@@ -400,13 +392,15 @@
       renderPage(path);
     }
 
-    // Intercept all same-origin <a> clicks
+    // Only the top nav changes page. Every other link is inert in this demo, so
+    // links in the content and footer never jump away. Recap's own panel is left alone.
     document.addEventListener('click', (e) => {
       const a = e.target.closest('a[href]');
-      if (!a) return;
+      if (!a || a.closest('.recap-panel-root')) return;
+      e.preventDefault();
+      if (!a.closest('#nav')) return;
       const url = new URL(a.href, location.origin);
       if (url.origin !== location.origin) return;
-      e.preventDefault();
       navigate(url.pathname);
     });
 

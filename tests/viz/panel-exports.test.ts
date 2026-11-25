@@ -105,6 +105,8 @@ describe('panel export feedback', () => {
     vi.mocked(exportJSON).mockReturnValueOnce(false);
     await openPanel();
 
+    // JSON lives behind the "More exports" disclosure
+    (document.querySelector('#recap-panel-btn-toggle-more-formats') as HTMLButtonElement).click();
     (document.querySelector('#recap-panel-btn-json') as HTMLButtonElement).click();
 
     expect(getLastToastText()).toContain('JSON export failed');
@@ -114,7 +116,7 @@ describe('panel export feedback', () => {
     vi.mocked(downloadFlowDiagram).mockReturnValueOnce(false);
     await openPanel();
 
-    // Flow SVG lives behind the "More formats" disclosure
+    // Flow SVG lives behind the "More exports" disclosure
     (document.querySelector('#recap-panel-btn-toggle-more-formats') as HTMLButtonElement).click();
     (document.querySelector('#recap-panel-btn-flow') as HTMLButtonElement).click();
 

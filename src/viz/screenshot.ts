@@ -1,13 +1,7 @@
 // Screenshot mode — instructs user to use OS screenshot tool while heatmap is visible.
 
-import { getHeatmapDataURL } from './heatmap.js';
-
 let _screenshotOverlay: HTMLDivElement | null = null;
 let _escHandler: ((e: KeyboardEvent) => void) | null = null;
-
-function buildFilename(): string {
-  return `recap-heatmap-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.png`;
-}
 
 export function enterScreenshotMode(): void {
   if (_screenshotOverlay) return;
@@ -71,20 +65,4 @@ function exitScreenshotMode(
     document.removeEventListener('keydown', _escHandler);
     _escHandler = null;
   }
-}
-
-/** Download the heatmap canvas layer as a transparent PNG. */
-export function downloadHeatmapPNG(): void {
-  const dataUrl = getHeatmapDataURL();
-  if (!dataUrl) {
-    console.warn('[Recap] Heatmap canvas not initialized');
-    return;
-  }
-  const a = document.createElement('a');
-  a.href = dataUrl;
-  a.download = buildFilename();
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
 }

@@ -7,6 +7,9 @@ import {
   resumeScrollCapture,
 } from '../../src/capture/scroll.js';
 
+// Sentinels are placed on the next tick, after the host has rendered.
+const nextTick = () => new Promise<void>((r) => setTimeout(r, 0));
+
 describe('scroll capture', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
@@ -24,9 +27,10 @@ describe('scroll capture', () => {
     cleanup();
   });
 
-  it('cleanup removes sentinels from DOM', () => {
+  it('cleanup removes sentinels from DOM', async () => {
     const handler = vi.fn();
     const cleanup = initScrollCapture(handler);
+    await nextTick();
     const sentinelsBefore = document.querySelectorAll('[data-recap-sentinel]').length;
     expect(sentinelsBefore).toBe(4);
     cleanup();
@@ -38,9 +42,10 @@ describe('scroll capture', () => {
     expect(getMaxScrollDepth()).toBe(0);
   });
 
-  it('sentinels have correct percentage values', () => {
+  it('sentinels have correct percentage values', async () => {
     const handler = vi.fn();
     const cleanup = initScrollCapture(handler);
+    await nextTick();
     const sentinels = document.querySelectorAll('[data-recap-sentinel]');
     const pcts = Array.from(sentinels).map((s) =>
       Number(s.getAttribute('data-recap-sentinel'))
@@ -49,7 +54,27 @@ describe('scroll capture', () => {
     cleanup();
   });
 
-  it('suppresses capture while paused, and resumes after resumeScrollCapture', () => {
+  it('places sentinels against the page as it is after a late render', async () => {
+    const handler = vi.fn();
+    const cleanup = initScrollCapture(handler);
+    // Simulate an SPA that renders its content after init has run.
+    Object.defineProperty(document.body, 'scrollHeight', { configurable: true, value: 3000 });
+    await nextTick();
+    const half = document.querySelector('[data-recap-sentinel="50"]') as HTMLElement;
+    expect(half.style.top).toBe('1500px');
+    cleanup();
+    delete (document.body as unknown as Record<string, unknown>)['scrollHeight'];
+  });
+
+  it('leaves no sentinels when cleaned up before the first tick', async () => {
+    const handler = vi.fn();
+    const cleanup = initScrollCapture(handler);
+    cleanup();
+    await nextTick();
+    expect(document.querySelectorAll('[data-recap-sentinel]').length).toBe(0);
+  });
+
+  it('suppresses capture while paused, and resumes after resumeScrollCapture', async () => {
     // Mirror real rAF's async ordering: `raf` is only invoked once we call it
     // ourselves, after onScroll's synchronous `ticking = true` has already run.
     // A rAF stub that calls back synchronously would run the callback (which
@@ -62,6 +87,7 @@ describe('scroll capture', () => {
     });
     const handler = vi.fn();
     const cleanup = initScrollCapture(handler);
+    await nextTick();
 
     pauseScrollCapture();
     window.dispatchEvent(new Event('scroll'));

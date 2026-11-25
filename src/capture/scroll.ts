@@ -19,6 +19,7 @@ let _rafId: number | null = null;
 let _resizeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let _cleanupFns: Array<() => void> = [];
 let _paused = false;
+let _initTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function pauseScrollCapture(): void { _paused = true; }
 export function resumeScrollCapture(): void { _paused = false; }
@@ -114,7 +115,10 @@ function setupObserver(): void {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
         const pct = Number(entry.target.getAttribute('data-recap-sentinel'));
-        if (!milestonesSeen.has(pct)) {
+        // Only count a milestone the user has actually reached right now. After an SPA
+        // navigation the old scroll position can still be in effect when the observer
+        // fires, and that would credit the new visit with depth it never scrolled to.
+        if (!milestonesSeen.has(pct) && getScrollDepth() >= pct) {
           milestonesSeen.add(pct);
           emitScroll(pct);
         }
@@ -174,12 +178,18 @@ export function initScrollCapture(handler: ScrollHandler, stripQuery = true): ()
   _maxDepth = 0;
   _lastLoggedDepth = 0;
 
-  try {
-    createSentinels();
-    setupObserver();
-  } catch (err) {
-    console.error('[Recap] Scroll sentinel setup error:', err);
-  }
+  // Measure the page after the host has rendered. SPAs often render their content
+  // after Recap.init(); measuring now would place the milestone sentinels on an
+  // empty shell, where they fire immediately and lock maxDepth at 100.
+  _initTimer = setTimeout(() => {
+    _initTimer = null;
+    try {
+      createSentinels();
+      setupObserver();
+    } catch (err) {
+      console.error('[Recap] Scroll sentinel setup error:', err);
+    }
+  }, 0);
 
   startContinuousTracking();
 
@@ -188,6 +198,7 @@ export function initScrollCapture(handler: ScrollHandler, stripQuery = true): ()
 
   return () => {
     _handler = null;
+    if (_initTimer !== null) { clearTimeout(_initTimer); _initTimer = null; }
     if (_observer) { _observer.disconnect(); _observer = null; }
     if (_rafId !== null) { cancelAnimationFrame(_rafId); _rafId = null; }
     if (_resizeDebounceTimer !== null) { clearTimeout(_resizeDebounceTimer); _resizeDebounceTimer = null; }
