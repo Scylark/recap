@@ -1109,10 +1109,16 @@ function bindEvents(root: HTMLDivElement): void {
     .querySelector<HTMLButtonElement>(`#${PREFIX}-btn-screenshot`)
     ?.addEventListener('click', () => {
       _moreFormatsExpanded = false;
-      closePanel();
+      // Hide the panel while capturing, then bring it back as the minimised pill
+      _minimised = true;
+      if (_panelRoot) _panelRoot.style.display = 'none';
       renderHeatmap(getClicks(_allEvents), _heatmapFilter ?? undefined);
       showHeatmap();
-      enterScreenshotMode();
+      enterScreenshotMode(() => {
+        if (!_panelRoot) return;
+        _panelRoot.style.display = 'flex';
+        render(_panelRoot, _sessions);
+      });
     });
 
   // Export AI
