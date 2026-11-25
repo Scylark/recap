@@ -115,3 +115,37 @@ export function generateTimeline(events: AnyEvent[], isCurrentSession = false): 
     };
   });
 }
+
+/**
+ * Absolute time window (same clock as event timestamps) for one visit.
+ * Visit offsets are seconds from the session's first event, so the session start
+ * is added back. The last visit is open-ended so its final clicks are included.
+ */
+export function visitWindowMs(
+  visit: PageVisit,
+  sessionStartMs: number,
+  isLastVisit: boolean
+): { visitStartMs: number; visitEndMs: number | null } {
+  const visitStartMs = sessionStartMs + visit.arrivalTime * 1000;
+  const visitEndMs =
+    isLastVisit || visit.duration === null
+      ? null
+      : sessionStartMs + (visit.arrivalTime + visit.duration) * 1000;
+  return { visitStartMs, visitEndMs };
+}
+
+/**
+ * Keep only the events that belong to one visit: same page, inside the visit window.
+ * Used so the visit view's stats and scroll depth match the heatmap's clicks.
+ */
+export function eventsInVisit(
+  events: AnyEvent[],
+  visit: { pagePath: string; visitStartMs: number; visitEndMs: number | null }
+): AnyEvent[] {
+  return events.filter(
+    (e) =>
+      e.url === visit.pagePath &&
+      e.timestamp >= visit.visitStartMs &&
+      (visit.visitEndMs === null || e.timestamp < visit.visitEndMs)
+  );
+}

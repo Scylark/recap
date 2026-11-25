@@ -15,14 +15,14 @@ import {
   type HeatmapFilter,
 } from './heatmap.js';
 import { showScrollDepthOverlay, hideScrollDepthOverlay, isScrollDepthVisible, updateScrollDepthOverlay } from './scroll-depth.js';
-import { enterScreenshotMode, downloadHeatmapPNG } from './screenshot.js';
+import { enterScreenshotMode } from './screenshot.js';
 import { downloadFlowDiagram } from './flow-diagram.js';
 import { getSessionId, getSessionName } from '../capture/session.js';
 import { pauseClickCapture, resumeClickCapture } from '../capture/clicks.js';
 import { pauseNavigationCapture, resumeNavigationCapture } from '../capture/navigation.js';
 import { pauseScrollCapture, resumeScrollCapture } from '../capture/scroll.js';
 import { buildTimelineHTML, TIMELINE_STYLES } from './timeline-view.js';
-import { generateTimeline } from '../analysis/timeline.js';
+import { eventsInVisit, generateTimeline, visitWindowMs } from '../analysis/timeline.js';
 
 const PREFIX = 'recap-panel';
 const PARTICIPANT_GUIDANCE_METRICS_KEY = 'recap-participant-guidance-metrics';
@@ -47,6 +47,8 @@ const LOGO_MARK =
 
 const ICONS = {
   close: icon('<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>', 15),
+  minimise: icon('<line x1="5" y1="12" x2="19" y2="12"/>', 15),
+  expand: icon('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>', 15),
   flame: icon(
     '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>'
   ),
@@ -109,7 +111,7 @@ const STYLES = `
     bottom: 20px;
     right: 20px;
     width: 320px;
-    max-height: 70vh;
+    height: min(560px, 70vh);
     background: var(--background);
     color: var(--foreground);
     border: 1px solid var(--border);
@@ -134,6 +136,26 @@ const STYLES = `
     cursor: move;
     flex-shrink: 0;
   }
+  .${PREFIX}-root.${PREFIX}-minimised {
+    height: auto;
+    width: auto;
+    border-radius: 999px;
+  }
+  .${PREFIX}-root.${PREFIX}-minimised .${PREFIX}-header {
+    border-bottom: none;
+    padding: 8px 12px;
+    gap: 14px;
+    cursor: default;
+  }
+  .${PREFIX}-root.${PREFIX}-minimised .${PREFIX}-body,
+  .${PREFIX}-root.${PREFIX}-minimised .${PREFIX}-footer {
+    display: none;
+  }
+  .${PREFIX}-minimise {
+    background: none; border: none; color: var(--muted-foreground); cursor: pointer;
+    padding: 4px; border-radius: 4px; display: flex; align-items: center;
+  }
+  .${PREFIX}-minimise:hover { background: var(--accent); color: var(--foreground); }
   .${PREFIX}-title {
     display: inline-flex;
     align-items: center;
@@ -567,7 +589,7 @@ const STYLES = `
       width: calc(100vw - 24px);
       right: 12px;
       bottom: 12px;
-      max-height: 80vh;
+      height: min(560px, 80vh);
     }
     .${PREFIX}-toast {
       right: 12px;
@@ -584,8 +606,8 @@ let _activeTab: 'heatmap' | 'timeline' = 'heatmap';
 let _heatmapFilter: HeatmapFilter | null = null;
 let _origPushState: typeof history.pushState | null = null;
 let _hasTrackedTooltipOpened = false;
-let _preferredPanelMinHeight = 0;
 let _moreFormatsExpanded = false;
+let _minimised = false;
 
 function readStorage(key: string): string | null {
   try {
@@ -651,7 +673,7 @@ function handleUrlChange(): void {
     _heatmapFilter = null;
   }
   if (isHeatmapVisible()) renderHeatmap(getClicks(_allEvents), _heatmapFilter ?? undefined);
-  if (isScrollDepthVisible()) updateScrollDepthOverlay(getScrolls(_allEvents));
+  if (isScrollDepthVisible()) updateScrollDepthOverlay(getScrolls(scopedEvents()));
   render(_panelRoot, _sessions);
 }
 
@@ -700,6 +722,11 @@ function getClicks(events: AnyEvent[]): ClickEvent[] {
   return events.filter((e): e is ClickEvent => e.type === 'click');
 }
 
+/** All session events, narrowed to the selected visit when a visit filter is applied. */
+function scopedEvents(): AnyEvent[] {
+  return _heatmapFilter ? eventsInVisit(_allEvents, _heatmapFilter) : _allEvents;
+}
+
 function getScrolls(events: AnyEvent[]): ScrollEvent[] {
   return events.filter((e): e is ScrollEvent => e.type === 'scroll');
 }
@@ -708,12 +735,22 @@ function getNavs(events: AnyEvent[]): NavigationEvent[] {
   return events.filter((e): e is NavigationEvent => e.type === 'navigation');
 }
 
-function getStats(events: AnyEvent[]): {
+function getStats(events: AnyEvent[], visit?: HeatmapFilter): {
   clicks: number;
   pages: number;
   duration: number;
   maxScroll: number;
 } {
+  if (visit) {
+    // Visit view: count only this visit's events, so scroll depth starts from zero on each visit.
+    const scoped = eventsInVisit(events, visit);
+    const maxScroll = getScrolls(scoped).reduce((m, s) => Math.max(m, s.depth), 0);
+    const visitDuration =
+      scoped.length > 1
+        ? Math.round((scoped[scoped.length - 1]!.timestamp - scoped[0]!.timestamp) / 1000)
+        : 0;
+    return { clicks: getClicks(scoped).length, pages: 1, duration: visitDuration, maxScroll };
+  }
   const navs = getNavs(events);
   const scrolls = getScrolls(events);
   const pages = new Set(navs.map((n) => n.to).filter(Boolean)).size;
@@ -742,7 +779,6 @@ export async function openPanel(): Promise<void> {
     renderHeatmap(getClicks(_allEvents), _heatmapFilter ?? undefined);
     render(_panelRoot, _sessions);
     _panelRoot.style.display = 'flex';
-    if (_activeTab === 'heatmap') syncPanelMinHeight(_panelRoot);
     pauseClickCapture();
     pauseNavigationCapture();
     pauseScrollCapture();
@@ -769,7 +805,6 @@ export async function openPanel(): Promise<void> {
 
   render(_panelRoot, _sessions);
   document.body.appendChild(_panelRoot);
-  if (_activeTab === 'heatmap') syncPanelMinHeight(_panelRoot);
 
   // Listen for SPA navigation so overlays stay in sync with the current page
   _origPushState = history.pushState.bind(history);
@@ -793,7 +828,7 @@ function render(
   root: HTMLDivElement,
   sessions: Awaited<ReturnType<typeof getAllSessions>>
 ): void {
-  const stats = getStats(_allEvents);
+  const stats = getStats(_allEvents, _heatmapFilter ?? undefined);
 
   const sessionOptions = sessions
     .map(
@@ -855,10 +890,14 @@ function render(
     </div>
   `;
 
+  root.classList.toggle(`${PREFIX}-minimised`, _minimised);
   root.innerHTML = `
     <div class="${PREFIX}-header">
       <span class="${PREFIX}-title"><span class="${PREFIX}-title-icon">${LOGO_MARK}</span>Recap</span>
-      <button class="${PREFIX}-close" aria-label="Close panel">${ICONS.close}</button>
+      <div style="display:flex;align-items:center;gap:4px;">
+        <button class="${PREFIX}-minimise" id="${PREFIX}-btn-minimise" aria-label="${_minimised ? 'Expand panel' : 'Minimise panel'}">${_minimised ? ICONS.expand : ICONS.minimise}</button>
+        <button class="${PREFIX}-close" aria-label="Close panel">${ICONS.close}</button>
+      </div>
     </div>
     <div class="${PREFIX}-body">
       <div class="${PREFIX}-content-scroll">
@@ -908,20 +947,17 @@ function render(
       <div class="${PREFIX}-section" style="margin-top:12px;margin-bottom:0;">
         <div class="${PREFIX}-label">Export</div>
         <button class="${PREFIX}-export-primary" id="${PREFIX}-btn-ai">${ICONS.sparkles}<span>Export for AI</span></button>
-        <div class="${PREFIX}-exports">
-          <button class="${PREFIX}-btn" id="${PREFIX}-btn-screenshot">Screenshot</button>
-          <button class="${PREFIX}-btn" id="${PREFIX}-btn-json">Raw JSON</button>
-          <button class="${PREFIX}-btn" id="${PREFIX}-btn-csv">CSV</button>
-        </div>
         <div class="${PREFIX}-more-formats-wrap">
           <button class="${PREFIX}-more-formats ${_moreFormatsExpanded ? 'expanded' : ''}" id="${PREFIX}-btn-toggle-more-formats">
-            <span>More formats</span>
+            <span>More exports</span>
             ${ICONS.chevronDown}
           </button>
           ${
             _moreFormatsExpanded
               ? `<div class="${PREFIX}-formats-menu" role="menu">
-                   <button class="${PREFIX}-formats-menu-item" id="${PREFIX}-btn-heatmap-png" role="menuitem">${ICONS.image}<span>Heatmap PNG</span></button>
+                   <button class="${PREFIX}-formats-menu-item" id="${PREFIX}-btn-json" role="menuitem">${ICONS.fileText}<span>JSON</span></button>
+                   <button class="${PREFIX}-formats-menu-item" id="${PREFIX}-btn-csv" role="menuitem">${ICONS.fileText}<span>CSV</span></button>
+                   <button class="${PREFIX}-formats-menu-item" id="${PREFIX}-btn-screenshot" role="menuitem">${ICONS.camera}<span>Screenshot</span></button>
                    <button class="${PREFIX}-formats-menu-item" id="${PREFIX}-btn-flow" role="menuitem">${ICONS.route}<span>Flow SVG</span></button>
                  </div>`
               : ''
@@ -935,29 +971,19 @@ function render(
   `;
 
   bindEvents(root);
-  syncPanelMinHeight(root);
-}
-
-function syncPanelMinHeight(root: HTMLDivElement): void {
-  // Keep Timeline from collapsing when there is little/no timeline data by
-  // reusing the latest "good" Overview height as a minimum panel height.
-  if (_activeTab === 'heatmap') {
-    root.style.minHeight = '';
-    const measuredHeight = Math.round(root.getBoundingClientRect().height);
-    if (measuredHeight > 0) {
-      _preferredPanelMinHeight = measuredHeight;
-    }
-  }
-
-  if (_preferredPanelMinHeight <= 0) return;
-  const maxAllowedHeight = Math.floor(window.innerHeight * 0.7);
-  root.style.minHeight = `${Math.min(_preferredPanelMinHeight, maxAllowedHeight)}px`;
 }
 
 function bindEvents(root: HTMLDivElement): void {
   // Close
   root.querySelector<HTMLButtonElement>(`.${PREFIX}-close`)?.addEventListener('click', () => {
     closePanel();
+  });
+
+  // Minimise to a small pill, or expand back to full size
+  root.querySelector<HTMLButtonElement>(`#${PREFIX}-btn-minimise`)?.addEventListener('click', () => {
+    _minimised = !_minimised;
+    _moreFormatsExpanded = false;
+    render(root, _sessions);
   });
 
   // Session select
@@ -1025,14 +1051,9 @@ function bindEvents(root: HTMLDivElement): void {
       const totalVisits = timeline.filter((v) => v.pagePath === visit.pagePath).length;
       const label = totalVisits > 1 ? `visit ${visit.visitNumber} of ${totalVisits}` : '';
 
-      _heatmapFilter = {
-        pagePath: visit.pagePath,
-        visitStartMs: visit.arrivalTime * 1000,
-        visitEndMs: visit.duration !== null
-          ? (visit.arrivalTime + visit.duration) * 1000
-          : null,
-        label,
-      };
+      const sessionStartMs = _allEvents.reduce((min, e) => Math.min(min, e.timestamp), Infinity);
+      const range = visitWindowMs(visit, sessionStartMs, visitIndex === timeline.length - 1);
+      _heatmapFilter = { pagePath: visit.pagePath, ...range, label };
       // Navigate the SPA to the target page if needed.
       // Use _origPushState to avoid double-firing handleUrlChange, then dispatch
       // a synthetic popstate so the SPA router re-renders the page content.
@@ -1043,6 +1064,8 @@ function bindEvents(root: HTMLDivElement): void {
 
       renderHeatmap(getClicks(_allEvents), _heatmapFilter);
       if (!isHeatmapVisible()) showHeatmap();
+      // Refresh the scroll-depth view too, so it reflects the chosen visit straight away.
+      if (isScrollDepthVisible()) updateScrollDepthOverlay(getScrolls(scopedEvents()));
       render(_panelRoot!, _sessions);
     });
   });
@@ -1063,7 +1086,7 @@ function bindEvents(root: HTMLDivElement): void {
       if (isHeatmapVisible()) {
         hideHeatmap();
       } else {
-        renderHeatmap(getClicks(_allEvents));
+        renderHeatmap(getClicks(_allEvents), _heatmapFilter ?? undefined);
         showHeatmap();
       }
       render(root, _sessions);
@@ -1076,7 +1099,7 @@ function bindEvents(root: HTMLDivElement): void {
       if (isScrollDepthVisible()) {
         hideScrollDepthOverlay();
       } else {
-        showScrollDepthOverlay(getScrolls(_allEvents));
+        showScrollDepthOverlay(getScrolls(scopedEvents()));
       }
       render(root, _sessions);
     });
@@ -1085,10 +1108,17 @@ function bindEvents(root: HTMLDivElement): void {
   root
     .querySelector<HTMLButtonElement>(`#${PREFIX}-btn-screenshot`)
     ?.addEventListener('click', () => {
-      closePanel();
-      renderHeatmap(getClicks(_allEvents));
+      _moreFormatsExpanded = false;
+      // Hide the panel while capturing, then bring it back as the minimised pill
+      _minimised = true;
+      if (_panelRoot) _panelRoot.style.display = 'none';
+      renderHeatmap(getClicks(_allEvents), _heatmapFilter ?? undefined);
       showHeatmap();
-      enterScreenshotMode();
+      enterScreenshotMode(() => {
+        if (!_panelRoot) return;
+        _panelRoot.style.display = 'flex';
+        render(_panelRoot, _sessions);
+      });
     });
 
   // Export AI
@@ -1110,6 +1140,8 @@ function bindEvents(root: HTMLDivElement): void {
     .querySelector<HTMLButtonElement>(`#${PREFIX}-btn-json`)
     ?.addEventListener('click', () => {
       const didExport = exportJSON(_allEvents, getSessionName() ?? undefined);
+      _moreFormatsExpanded = false;
+      render(root, _sessions);
       if (didExport) {
         showToast('JSON exported!');
       } else {
@@ -1122,22 +1154,13 @@ function bindEvents(root: HTMLDivElement): void {
     .querySelector<HTMLButtonElement>(`#${PREFIX}-btn-csv`)
     ?.addEventListener('click', () => {
       const didExport = exportCSV(_allEvents, getSessionName() ?? undefined);
+      _moreFormatsExpanded = false;
+      render(root, _sessions);
       if (didExport) {
         showToast('CSV exported!');
       } else {
         showToast('CSV export failed. Check browser download permissions.', 3000, 'error');
       }
-    });
-
-  // Heatmap PNG
-  root
-    .querySelector<HTMLButtonElement>(`#${PREFIX}-btn-heatmap-png`)
-    ?.addEventListener('click', () => {
-      renderHeatmap(getClicks(_allEvents));
-      downloadHeatmapPNG();
-      _moreFormatsExpanded = false;
-      render(root, _sessions);
-      showToast('Heatmap PNG downloaded!');
     });
 
   // Flow SVG
@@ -1233,6 +1256,5 @@ export function destroyPanel(): void {
   _styleEl?.parentElement?.removeChild(_styleEl);
   _panelRoot = null;
   _styleEl = null;
-  _preferredPanelMinHeight = 0;
   _moreFormatsExpanded = false;
 }

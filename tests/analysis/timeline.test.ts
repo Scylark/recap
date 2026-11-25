@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateTimeline } from '../../src/analysis/timeline.js';
+import { eventsInVisit, generateTimeline, visitWindowMs } from '../../src/analysis/timeline.js';
 import type { AnyEvent, NavigationEvent } from '../../src/types.js';
 
 // --- Event factories ---
@@ -241,5 +241,68 @@ describe('generateTimeline — pageload first nav', () => {
 
   it('second entry arrivalTime is 8s', () => {
     expect(result[1]!.arrivalTime).toBeCloseTo(8, 1);
+  });
+});
+
+describe('visit windows select the clicks for one visit', () => {
+  // Session: home at 1000ms, phone 3000-6000 then again 8000-end, pad in between.
+  // Clicks use absolute timestamps, the same clock as the navigation events.
+  const events: AnyEvent[] = [
+    nav(1000, '', '/', 'pageload'),
+    nav(3000, '/', '/phone'),
+    click(3500, '/phone'),
+    nav(6000, '/phone', '/pad'),
+    click(6200, '/pad'),
+    nav(8000, '/pad', '/phone'),
+    click(8500, '/phone'),
+    click(9000, '/phone'),
+  ];
+
+  function clicksFor(visitIndex: number): number[] {
+    const visits = generateTimeline(events);
+    const sessionStartMs = Math.min(...events.map((e) => e.timestamp));
+    const isLast = visitIndex === visits.length - 1;
+    const range = visitWindowMs(visits[visitIndex]!, sessionStartMs, isLast);
+    return events
+      .filter((e): e is AnyEvent & { type: 'click' } => e.type === 'click')
+      .filter((c) => c.url === visits[visitIndex]!.pagePath)
+      .filter((c) => c.timestamp >= range.visitStartMs && (range.visitEndMs === null || c.timestamp < range.visitEndMs))
+      .map((c) => c.timestamp);
+  }
+
+  it('first visit to /phone contains only its own click', () => {
+    expect(clicksFor(1)).toEqual([3500]);
+  });
+
+  it('second visit to /phone contains only its own clicks, including the final one', () => {
+    expect(clicksFor(3)).toEqual([8500, 9000]);
+  });
+});
+
+describe('per-visit scroll depth', () => {
+  // First /phone visit scrolls to the bottom; the second visit does not scroll at all.
+  const events: AnyEvent[] = [
+    nav(1000, '', '/phone', 'pageload'),
+    { sessionId: 'test', timestamp: 1500, type: 'scroll', url: '/phone', viewport: { width: 1440, height: 900 }, depth: 100, maxDepth: 100 },
+    nav(3000, '/phone', '/pad'),
+    nav(5000, '/pad', '/phone'),
+    click(5500, '/phone'),
+  ];
+
+  function maxDepthFor(visitIndex: number): number {
+    const visits = generateTimeline(events);
+    const start = Math.min(...events.map((e) => e.timestamp));
+    const range = visitWindowMs(visits[visitIndex]!, start, visitIndex === visits.length - 1);
+    return eventsInVisit(events, { pagePath: visits[visitIndex]!.pagePath, ...range })
+      .filter((e): e is AnyEvent & { type: 'scroll' } => e.type === 'scroll')
+      .reduce((m, e) => Math.max(m, e.depth), 0);
+  }
+
+  it('the visit that scrolled reports its depth', () => {
+    expect(maxDepthFor(0)).toBe(100);
+  });
+
+  it('a later visit with no scrolling reports 0, not the earlier visit\'s 100', () => {
+    expect(maxDepthFor(2)).toBe(0);
   });
 });
