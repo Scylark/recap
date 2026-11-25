@@ -256,6 +256,7 @@ let _rafId = null;
 let _resizeDebounceTimer = null;
 let _cleanupFns$1 = [];
 let _paused$1 = false;
+let _initTimer = null;
 function pauseScrollCapture() {
   _paused$1 = true;
 }
@@ -341,7 +342,7 @@ function setupObserver() {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
         const pct = Number(entry.target.getAttribute("data-recap-sentinel"));
-        if (!milestonesSeen.has(pct)) {
+        if (!milestonesSeen.has(pct) && getScrollDepth() >= pct) {
           milestonesSeen.add(pct);
           emitScroll(pct);
         }
@@ -388,17 +389,24 @@ function initScrollCapture(handler, stripQuery = true) {
   _stripQuery$1 = stripQuery;
   _maxDepth = 0;
   _lastLoggedDepth = 0;
-  try {
-    createSentinels();
-    setupObserver();
-  } catch (err) {
-    console.error("[Recap] Scroll sentinel setup error:", err);
-  }
+  _initTimer = setTimeout(() => {
+    _initTimer = null;
+    try {
+      createSentinels();
+      setupObserver();
+    } catch (err) {
+      console.error("[Recap] Scroll sentinel setup error:", err);
+    }
+  }, 0);
   startContinuousTracking();
   window.addEventListener("resize", onResize, { passive: true });
   _cleanupFns$1.push(() => window.removeEventListener("resize", onResize));
   return () => {
     _handler$1 = null;
+    if (_initTimer !== null) {
+      clearTimeout(_initTimer);
+      _initTimer = null;
+    }
     if (_observer) {
       _observer.disconnect();
       _observer = null;
@@ -1118,7 +1126,7 @@ function downloadText(content, mimeType, filename) {
     filename
   );
 }
-function buildFilename$1(prefix, ext) {
+function buildFilename(prefix, ext) {
   const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
   return `${prefix}-${ts}.${ext}`;
 }
@@ -1131,7 +1139,7 @@ function exportJSON(events, sessionName) {
   const name = sessionName ? `recap-${sessionName}` : "recap-session";
   return triggerDownload(
     `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(payload, null, 2))}`,
-    buildFilename$1(name, "json")
+    buildFilename(name, "json")
   );
 }
 function exportCSV(events, sessionName) {
@@ -1198,24 +1206,36 @@ function exportCSV(events, sessionName) {
   const name = sessionName ? `recap-${sessionName}` : "recap-session";
   return triggerDownload(
     `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`,
-    buildFilename$1(name, "csv")
+    buildFilename(name, "csv")
   );
 }
 function exportSummaryJSON(summary, sessionName) {
   const name = sessionName ? `recap-ai-${sessionName}` : "recap-ai-summary";
   return triggerDownload(
     `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(summary, null, 2))}`,
-    buildFilename$1(name, "json")
+    buildFilename(name, "json")
   );
 }
 const DEFAULT_RADIUS = 25;
 const DEFAULT_BLUR = 15;
 const DEFAULT_OPACITY = 0.65;
 const DEFAULT_GRADIENT = {
-  0.4: "blue",
-  0.65: "lime",
+  0: "blue",
+  0.3: "blue",
+  0.6: "yellow",
   1: "red"
 };
+const EDGE_FADE_START = 2;
+const EDGE_FADE_END = 12;
+function smoothstep(edge0, edge1, x) {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+const MIN_OUTPUT_OPACITY = 0.4;
+const MAX_OUTPUT_OPACITY = 0.8;
+const CLICK_ALPHA = 0.05;
+const REFERENCE_CLICKS = 4;
+const MIN_REFERENCE_DENSITY = 255 * (1 - Math.pow(1 - CLICK_ALPHA, REFERENCE_CLICKS));
 let _canvas = null;
 let _ctx = null;
 let _circle = null;
@@ -1231,7 +1251,7 @@ function handleScroll() {
   _scrollScheduled = true;
   requestAnimationFrame(() => {
     _scrollScheduled = false;
-    renderHeatmap(_clicks);
+    renderHeatmap(_clicks, _filter ?? void 0);
   });
 }
 function createCircle(radius, blur) {
@@ -1263,15 +1283,27 @@ function createColorGradient(stops) {
 }
 function colorize(pixels, gradient) {
   const data = pixels.data;
+  let maxDensity = 0;
+  for (let i = 3, len = data.length; i < len; i += 4) {
+    if (data[i] > maxDensity) maxDensity = data[i];
+  }
+  if (maxDensity === 0) return;
+  const reference = Math.max(maxDensity, MIN_REFERENCE_DENSITY);
   for (let i = 0, len = data.length; i < len; i += 4) {
-    const alpha = data[i + 3];
-    if (alpha > 0) {
-      const idx = alpha * 4;
-      data[i] = gradient[idx];
-      data[i + 1] = gradient[idx + 1];
-      data[i + 2] = gradient[idx + 2];
-      data[i + 3] = alpha;
+    const density = data[i + 3];
+    if (density < EDGE_FADE_START) {
+      data[i + 3] = 0;
+      continue;
     }
+    const edge = smoothstep(EDGE_FADE_START, EDGE_FADE_END, density);
+    const t = Math.min(1, density / reference);
+    const idx = Math.round(t * 255) * 4;
+    data[i] = gradient[idx];
+    data[i + 1] = gradient[idx + 1];
+    data[i + 2] = gradient[idx + 2];
+    data[i + 3] = Math.round(
+      255 * edge * (MIN_OUTPUT_OPACITY + (MAX_OUTPUT_OPACITY - MIN_OUTPUT_OPACITY) * t)
+    );
   }
 }
 function initHeatmapCanvas() {
@@ -1315,7 +1347,7 @@ function renderHeatmap(clicks, filter) {
     (c) => c.url === _filter.pagePath && c.timestamp >= _filter.visitStartMs && (_filter.visitEndMs === null || c.timestamp < _filter.visitEndMs)
   ) : clicks.filter((c) => c.url === currentPage);
   if (visible.length === 0) return;
-  _ctx.globalAlpha = 0.05;
+  _ctx.globalAlpha = CLICK_ALPHA;
   for (const click of visible) {
     const r = _radius + _blur;
     _ctx.drawImage(_circle, click.pageX - window.scrollX - r, click.pageY - window.scrollY - r);
@@ -1332,10 +1364,6 @@ function hideHeatmap() {
 }
 function isHeatmapVisible() {
   return _canvas?.style.display !== "none";
-}
-function getHeatmapDataURL() {
-  if (!_canvas) return null;
-  return _canvas.toDataURL("image/png");
 }
 let _overlay = null;
 let _marker = null;
@@ -1398,23 +1426,16 @@ function initScrollDepthOverlay() {
 }
 function updateScrollDepthOverlay(events) {
   if (!_overlay || !_marker || !_label) return;
-  if (events.length === 0) {
+  if (!_isVisible) {
     _overlay.style.opacity = "0";
     _marker.style.display = "none";
     _label.style.display = "none";
     return;
   }
-  const byUrl = /* @__PURE__ */ new Map();
-  for (const e of events) {
-    const prev = byUrl.get(e.url) ?? 0;
-    if (e.maxDepth > prev) byUrl.set(e.url, e.maxDepth);
-  }
   const currentUrl = location.pathname;
-  const depth = byUrl.get(currentUrl) ?? 0;
-  if (depth === 0) {
-    _marker.style.display = "none";
-    _label.style.display = "none";
-    return;
+  let depth = 0;
+  for (const e of events) {
+    if (e.url === currentUrl && e.maxDepth > depth) depth = e.maxDepth;
   }
   const markerY = depth / 100 * window.innerHeight;
   const clampedY = Math.min(Math.max(0, markerY), window.innerHeight - 3);
@@ -1423,6 +1444,8 @@ function updateScrollDepthOverlay(events) {
   _label.textContent = `◄ ${depth}%`;
   _marker.style.display = "block";
   _label.style.display = "block";
+  _overlay.style.display = "block";
+  _overlay.style.opacity = "0.75";
 }
 function showScrollDepthOverlay(events) {
   if (!_overlay) initScrollDepthOverlay();
@@ -1459,72 +1482,73 @@ function isScrollDepthVisible() {
 }
 let _screenshotOverlay = null;
 let _escHandler = null;
-function buildFilename() {
-  return `recap-heatmap-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19)}.png`;
-}
-function enterScreenshotMode() {
+let _autoExitTimer = null;
+function enterScreenshotMode(onExit) {
   if (_screenshotOverlay) return;
   const heatmapCanvas = document.querySelector('canvas[aria-hidden="true"]');
   const prevOpacity = heatmapCanvas?.style.opacity;
   if (heatmapCanvas) heatmapCanvas.style.opacity = "1";
+  const isMac = typeof navigator !== "undefined" && (navigator.platform?.toLowerCase().includes("mac") || navigator.userAgentData?.platform?.toLowerCase().includes("mac"));
+  const shortcut = isMac ? "Cmd+Shift+4" : "Win+Shift+S";
   _screenshotOverlay = document.createElement("div");
   _screenshotOverlay.style.cssText = `
     position: fixed;
-    bottom: 80px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(0,0,0,0.85);
-    color: #fff;
-    font: 14px/1.5 system-ui, sans-serif;
-    padding: 14px 20px;
-    border-radius: 8px;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(24,24,27,0.92);
+    color: #fafafa;
+    font: 13px/1 system-ui, -apple-system, sans-serif;
+    padding: 8px 14px;
+    border-radius: 999px;
     z-index: 10001;
-    text-align: center;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.5);
-    max-width: 420px;
+    white-space: nowrap;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
   `;
-  const isMac = typeof navigator !== "undefined" && (navigator.platform?.toLowerCase().includes("mac") || navigator.userAgentData?.platform?.toLowerCase().includes("mac"));
-  const shortcut = isMac ? "Cmd+Shift+4" : "Win+Shift+S";
-  _screenshotOverlay.innerHTML = `
-    <strong>Heatmap overlay is visible</strong><br>
-    Take a screenshot now.<br>
-    <small>${shortcut} on ${isMac ? "Mac" : "Windows"} · Press <kbd style="background:#333;padding:1px 5px;border-radius:3px">Esc</kbd> to exit screenshot mode</small>
-  `;
+  _screenshotOverlay.innerHTML = `${shortcut} · <kbd style="background:#3f3f46;padding:1px 5px;border-radius:4px;font:inherit">Esc</kbd> to exit`;
   document.body.appendChild(_screenshotOverlay);
-  _escHandler = (e) => {
-    if (e.key === "Escape") exitScreenshotMode(heatmapCanvas, prevOpacity);
-  };
-  document.addEventListener("keydown", _escHandler);
-  setTimeout(() => exitScreenshotMode(heatmapCanvas, prevOpacity), 3e4);
-}
-function exitScreenshotMode(canvas, prevOpacity) {
-  if (canvas && prevOpacity !== void 0) canvas.style.opacity = prevOpacity;
-  if (_screenshotOverlay) {
+  const exit = () => {
+    if (_autoExitTimer !== null) {
+      clearTimeout(_autoExitTimer);
+      _autoExitTimer = null;
+    }
+    if (!_screenshotOverlay) return;
+    if (heatmapCanvas && prevOpacity !== void 0) heatmapCanvas.style.opacity = prevOpacity;
     _screenshotOverlay.parentElement?.removeChild(_screenshotOverlay);
     _screenshotOverlay = null;
-  }
-  if (_escHandler) {
-    document.removeEventListener("keydown", _escHandler);
-    _escHandler = null;
-  }
+    if (_escHandler) {
+      document.removeEventListener("keydown", _escHandler);
+      _escHandler = null;
+    }
+    onExit();
+  };
+  _escHandler = (e) => {
+    if (e.key === "Escape") exit();
+  };
+  document.addEventListener("keydown", _escHandler);
+  _autoExitTimer = setTimeout(exit, 3e4);
 }
-function downloadHeatmapPNG() {
-  const dataUrl = getHeatmapDataURL();
-  if (!dataUrl) {
-    console.warn("[Recap] Heatmap canvas not initialized");
-    return;
-  }
-  const a = document.createElement("a");
-  a.href = dataUrl;
-  a.download = buildFilename();
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-}
+const COLOUR = {
+  background: "#09090b",
+  boxFill: "#18181b",
+  boxStroke: "#4299e1",
+  text: "#fafafa",
+  muted: "#a1a1aa",
+  forward: "#4299e1",
+  back: "#f6ad55",
+  badgeText: "#09090b"
+};
+const BOX_W = 180;
+const BOX_H = 56;
+const GAP_X = 70;
+const MIN_WIDTH = 420;
+const TITLE_CLEARANCE = 75;
+const ARC_BASE = 45;
+const ARC_STEP = 18;
+const BOTTOM_MARGIN = 96;
 function buildFlowGraph(navEvents) {
   const nodeMap = /* @__PURE__ */ new Map();
-  const edgeMap = /* @__PURE__ */ new Map();
+  const routeMap = /* @__PURE__ */ new Map();
+  let stepCount = 0;
   for (let i = 0; i < navEvents.length; i++) {
     const nav = navEvents[i];
     if (nav.to && !nodeMap.has(nav.to)) {
@@ -1532,12 +1556,13 @@ function buildFlowGraph(navEvents) {
     }
     if (nav.to) nodeMap.get(nav.to).visits++;
     if (nav.from && nav.to && nav.from !== nav.to) {
+      stepCount++;
       const key = `${nav.from}→${nav.to}`;
-      const edge = edgeMap.get(key);
-      if (edge) {
-        edge.count++;
+      const route = routeMap.get(key);
+      if (route) {
+        route.steps.push(stepCount);
       } else {
-        edgeMap.set(key, { from: nav.from, to: nav.to, count: 1 });
+        routeMap.set(key, { from: nav.from, to: nav.to, steps: [stepCount] });
       }
     }
   }
@@ -1547,12 +1572,13 @@ function buildFlowGraph(navEvents) {
     const node = nodeMap.get(cur.to);
     if (node) node.totalTime += (next.timestamp - cur.timestamp) / 1e3;
   }
-  return {
-    nodes: Array.from(nodeMap.values()),
-    edges: Array.from(edgeMap.values())
-  };
+  return { nodes: Array.from(nodeMap.values()), routes: Array.from(routeMap.values()) };
 }
-function truncateUrl(url, maxLen = 20) {
+function escapeXml(text) {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function truncateUrl(url, maxLen = 22) {
+  if (url === "/") return "/ (Home)";
   if (url.length <= maxLen) return url;
   return "…" + url.slice(-(maxLen - 1));
 }
@@ -1560,55 +1586,91 @@ function formatSeconds(s) {
   if (s < 60) return `${Math.round(s)}s`;
   return `${Math.floor(s / 60)}m${Math.round(s % 60)}s`;
 }
+function stepLabel(steps) {
+  const shown = steps.slice(0, 3).join(",");
+  return steps.length > 3 ? `${shown}…` : shown;
+}
+function badge(x, y, label, fill) {
+  const w = Math.max(20, label.length * 7 + 10);
+  return `<rect x="${x - w / 2}" y="${y - 10}" width="${w}" height="20" rx="10" fill="${fill}"/><text x="${x}" y="${y + 4}" text-anchor="middle" fill="${COLOUR.badgeText}" font-size="11" font-weight="700">${escapeXml(label)}</text>`;
+}
+function arcDepth(span) {
+  return ARC_BASE + ARC_STEP * (span - 1);
+}
 function generateFlowSVG(navEvents) {
-  const { nodes, edges } = buildFlowGraph(navEvents);
+  const { nodes, routes } = buildFlowGraph(navEvents);
   if (nodes.length === 0) {
     return '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="60"><text x="10" y="30" font-family="system-ui" font-size="14" fill="#888">No navigation events recorded</text></svg>';
   }
-  const BOX_W = 160;
-  const BOX_H = 50;
-  const GAP_X = 40;
-  const GAP_Y = 30;
-  const COLS = Math.min(3, nodes.length);
-  const svgW = COLS * (BOX_W + GAP_X) + GAP_X;
-  const svgH = Math.ceil(nodes.length / COLS) * (BOX_H + GAP_Y) + GAP_Y + 40;
-  const nodePositions = /* @__PURE__ */ new Map();
+  const order = new Map(nodes.map((node, i) => [node.url, i]));
+  const n = nodes.length;
+  const totalSteps = routes.reduce((sum, r) => sum + r.steps.length, 0);
+  let aboveDepth = 0;
+  let belowDepth = 0;
+  for (const route of routes) {
+    const i = order.get(route.from);
+    const j = order.get(route.to);
+    if (j < i) aboveDepth = Math.max(aboveDepth, arcDepth(i - j));
+    if (j > i + 1) belowDepth = Math.max(belowDepth, arcDepth(j - i));
+  }
+  const top = Math.max(150, TITLE_CLEARANCE + aboveDepth);
+  const rowWidth = n * BOX_W + (n - 1) * GAP_X;
+  const svgW = Math.max(MIN_WIDTH, rowWidth + 120);
+  const left = (svgW - rowWidth) / 2;
+  const x = (i) => left + i * (BOX_W + GAP_X);
+  const cx = (i) => x(i) + BOX_W / 2;
+  const midY = top + BOX_H / 2;
+  const svgH = top + BOX_H + belowDepth + BOTTOM_MARGIN;
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}" font-family="system-ui, -apple-system, sans-serif">`;
+  svg += `<rect width="${svgW}" height="${svgH}" fill="${COLOUR.background}"/>`;
+  svg += `<defs>`;
+  svg += `<marker id="flow-arrow-forward" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="${COLOUR.forward}"/></marker>`;
+  svg += `<marker id="flow-arrow-back" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="${COLOUR.back}"/></marker>`;
+  svg += `</defs>`;
+  svg += `<text x="${svgW / 2}" y="30" text-anchor="middle" fill="${COLOUR.text}" font-size="15" font-weight="600">Navigation flow · ${totalSteps} steps, ${n} pages</text>`;
+  svg += `<text x="${svgW / 2}" y="50" text-anchor="middle" fill="${COLOUR.muted}" font-size="12">Pages in order of first visit</text>`;
+  for (const route of routes) {
+    const i = order.get(route.from);
+    const j = order.get(route.to);
+    const label = stepLabel(route.steps);
+    if (j === i + 1) {
+      const x1 = x(i) + BOX_W;
+      const x2 = x(j);
+      svg += `<line x1="${x1}" y1="${midY}" x2="${x2}" y2="${midY}" stroke="${COLOUR.forward}" stroke-width="2.5" marker-end="url(#flow-arrow-forward)"/>`;
+      svg += badge((x1 + x2) / 2, midY - 18, label, COLOUR.forward);
+    } else if (j > i + 1) {
+      const depth = arcDepth(j - i);
+      const x1 = cx(i);
+      const x2 = cx(j);
+      const apexY = top + BOX_H + depth;
+      svg += `<path d="M ${x1} ${top + BOX_H} Q ${(x1 + x2) / 2} ${top + BOX_H + 2 * depth} ${x2} ${top + BOX_H}" fill="none" stroke="${COLOUR.forward}" stroke-width="2" marker-end="url(#flow-arrow-forward)"/>`;
+      svg += badge((x1 + x2) / 2, apexY, label, COLOUR.forward);
+    } else if (j < i) {
+      const depth = arcDepth(i - j);
+      const x1 = cx(i);
+      const x2 = cx(j);
+      const apexY = top - depth;
+      svg += `<path d="M ${x1} ${top} Q ${(x1 + x2) / 2} ${top - 2 * depth} ${x2} ${top}" fill="none" stroke="${COLOUR.back}" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#flow-arrow-back)"/>`;
+      svg += badge((x1 + x2) / 2, apexY, label, COLOUR.back);
+    }
+  }
   nodes.forEach((node, i) => {
-    const col = i % COLS;
-    const row = Math.floor(i / COLS);
-    nodePositions.set(node.url, {
-      x: GAP_X + col * (BOX_W + GAP_X),
-      y: 50 + row * (BOX_H + GAP_Y)
-    });
+    const avg = node.visits > 0 ? node.totalTime / node.visits : 0;
+    const visitsLabel = `${node.visits} ${node.visits === 1 ? "visit" : "visits"} · avg ${formatSeconds(avg)}`;
+    svg += `<rect x="${x(i)}" y="${top}" width="${BOX_W}" height="${BOX_H}" rx="8" fill="${COLOUR.boxFill}" stroke="${COLOUR.boxStroke}" stroke-width="1.5"/>`;
+    svg += `<text x="${cx(i)}" y="${top + 23}" text-anchor="middle" fill="${COLOUR.text}" font-size="13" font-weight="600">${escapeXml(truncateUrl(node.url))}</text>`;
+    svg += `<text x="${cx(i)}" y="${top + 41}" text-anchor="middle" fill="${COLOUR.muted}" font-size="11">${escapeXml(visitsLabel)}</text>`;
   });
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}" font-family="system-ui, sans-serif">`;
-  svg += `<rect width="${svgW}" height="${svgH}" fill="#1a1a2e"/>`;
-  svg += `<text x="${svgW / 2}" y="28" text-anchor="middle" fill="#a0aec0" font-size="13" font-weight="600">Navigation Flow</text>`;
-  for (const edge of edges) {
-    const from = nodePositions.get(edge.from);
-    const to = nodePositions.get(edge.to);
-    if (!from || !to) continue;
-    const x1 = from.x + BOX_W / 2;
-    const y1 = from.y + BOX_H;
-    const x2 = to.x + BOX_W / 2;
-    const y2 = to.y;
-    svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#4a5568" stroke-width="${Math.min(4, edge.count + 1)}" marker-end="url(#arrow)"/>`;
-  }
-  svg += `<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="4" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#4a5568"/></marker></defs>`;
-  for (const node of nodes) {
-    const pos = nodePositions.get(node.url);
-    const avgTime = node.visits > 0 ? node.totalTime / node.visits : 0;
-    svg += `<rect x="${pos.x}" y="${pos.y}" width="${BOX_W}" height="${BOX_H}" rx="6" fill="#2d3748" stroke="#4299e1" stroke-width="1.5"/>`;
-    svg += `<text x="${pos.x + BOX_W / 2}" y="${pos.y + 18}" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="600">${truncateUrl(node.url)}</text>`;
-    svg += `<text x="${pos.x + BOX_W / 2}" y="${pos.y + 34}" text-anchor="middle" fill="#a0aec0" font-size="10">${node.visits}x · avg ${formatSeconds(avgTime)}</text>`;
-  }
+  const legendY = top + BOX_H + belowDepth + 40;
+  svg += `<text x="${svgW / 2}" y="${legendY}" text-anchor="middle" fill="${COLOUR.muted}" font-size="12">Blue = forward · Orange dashed = went back · Number = step order</text>`;
+  svg += `<text x="${svgW - 16}" y="${svgH - 14}" text-anchor="end" fill="${COLOUR.muted}" font-size="11">www.recap-ux.com</text>`;
   svg += "</svg>";
   return svg;
 }
 function downloadFlowDiagram(navEvents, sessionName) {
   const svg = generateFlowSVG(navEvents);
   const name = sessionName ? `recap-flow-${sessionName}` : "recap-flow";
-  return downloadText(svg, "image/svg+xml", buildFilename$1(name, "svg"));
+  return downloadText(svg, "image/svg+xml", buildFilename(name, "svg"));
 }
 const LONG_PAUSE_S = 30;
 const BRIEF_VISIT_S = 2;
@@ -1673,6 +1735,16 @@ function generateTimeline(events, isCurrentSession = false) {
       tags
     };
   });
+}
+function visitWindowMs(visit, sessionStartMs, isLastVisit) {
+  const visitStartMs = sessionStartMs + visit.arrivalTime * 1e3;
+  const visitEndMs = isLastVisit || visit.duration === null ? null : sessionStartMs + (visit.arrivalTime + visit.duration) * 1e3;
+  return { visitStartMs, visitEndMs };
+}
+function eventsInVisit(events, visit) {
+  return events.filter(
+    (e) => e.url === visit.pagePath && e.timestamp >= visit.visitStartMs && (visit.visitEndMs === null || e.timestamp < visit.visitEndMs)
+  );
 }
 const PREFIX$1 = "recap-panel";
 const TAG_CONFIG = {
@@ -1820,15 +1892,20 @@ function icon(inner, size = 14) {
 const LOGO_MARK = '<svg width="19" height="14" viewBox="0 0 553 412" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0"><path d="M377.308 0C396.68 0.910718 414.26 12.1299 415.985 32.666C421.213 34.5745 426.418 36.554 431.593 38.6035C493.873 63.7061 551.885 107.778 552.838 178.872C553.295 213.012 551.121 245.224 538.806 277.2C531.283 296.73 530.067 297.489 515 288.96C452.578 418.999 359.961 408.617 312 411.755C194.8 414.265 143.848 330.937 133.022 288.96C130.981 280.879 129.924 273.963 128.901 265.731C92.7627 270.145 46.447 275.333 13.5049 255.288C1.36792 248.719 -5.13094 228.633 4.99609 217.696C32.0178 188.514 96.8497 180.197 133.742 173.844C142.342 108.846 156.165 50.1965 224.542 28.0488C266.825 14.3528 303.396 13.513 347.038 17.8535C354.013 5.01192 363.2 1.19355 377.308 0ZM192.943 188.5C185.974 187.975 168.93 187.19 162.053 187.588C123.728 188.854 45.4069 201.754 16.6279 229.871C50.4724 210.857 83.4688 209.719 120.924 219.89C155.099 229.169 185.628 247.37 219.761 257.542C262.193 270.189 312.052 265.911 353.301 250.463C355.971 249.461 355.393 245.995 355.235 243.704C356.36 242.163 356.068 242.188 358.093 241.821C370.063 239.654 391.16 257.565 393.688 268.219L393.103 269.459C387.485 270.856 378.545 262.965 370.558 260.824C362.645 292.773 351.358 326.252 321.118 344.306C305.423 353.825 286.55 356.6 268.781 352.002C229.061 341.712 209.45 307.505 202.637 269.842C186.726 263.507 169.913 255.381 154.3 249.531C151.155 248.373 151.718 247.971 149.474 248.948C146.326 255.448 153.142 284.754 155.785 292.829C191.61 402.308 382.287 431.746 436.138 322.952C446.24 302.548 449.015 278.467 448.04 255.546C359.383 224.819 306.425 194.588 209.908 189.131C203.146 196.264 199.252 207.682 208.772 214.622C219.859 222.703 233.813 222.136 246.688 224.149C248.665 224.46 248.747 225.389 248.942 226.592C245.316 230.153 233.641 231.138 228.766 230.865C198.608 229.179 185.324 217.664 192.943 188.5ZM338.548 300.407C330.875 297.508 319.468 295.204 311.401 297.029C290.141 299.816 269.065 310.506 256.683 328.462C265.149 333.975 273.784 337.67 284.067 338.108C310.19 338.409 326.788 322.351 338.548 300.407ZM531.11 190.242C528.688 168.658 509.3 153.075 487.708 155.349C465.898 157.645 450.133 177.264 452.578 199.06C455.023 220.855 474.748 236.49 496.521 233.893C518.083 231.321 533.533 211.826 531.11 190.242ZM408.208 48.6328C443.405 104.014 433.295 165.888 414.396 225.594C417.021 226.77 421.461 229.028 424.146 229.062C440.503 183.208 450.598 115.261 428.953 69.3672C426.553 64.2855 422.788 57.5425 419.945 52.6221C416.285 51.3033 411.898 49.5826 408.208 48.6328ZM390.575 43.0283C362.495 35.3142 316.28 28.4624 287.313 32.2598C256.152 34.9567 209.054 43.8138 187.929 69.6943C165.966 96.6012 158.262 138.937 155.745 172.739L187.137 173.171C185.874 164.665 183.88 148.696 188.232 140.857C192.934 132.389 217.018 144.512 216.8 132.676C211.769 125.298 190.635 125.236 192.468 116.397C196.456 97.1606 227.823 62.4465 243.87 91.2529C256.439 113.818 245.873 153.527 237.753 177.856C258.112 180.583 272.956 183.649 292.843 187.891C291.155 178.566 288.315 161.568 292.271 152.895C293.964 151.445 294.112 151.511 296.442 151.375C301.756 151.281 319.804 150.682 323.54 148.646C324.875 146.377 324.56 147.378 324.485 144.66C320.09 136.794 295.089 135.728 298.549 126.302C305.18 108.9 321.245 84.666 343.003 90.4326C349.01 92.0245 356.053 98.4983 358.355 104.133C371.255 135.679 359.39 174.157 345.545 202.723C365 208.975 384.411 215.393 403.761 221.976C419.121 177.536 430.055 115.22 409.062 70.5703C404.27 60.3792 397.738 51.6396 390.575 43.0283ZM492.875 174.325C495.132 177.596 492.59 188.038 491.975 192.742C496.355 189.855 511.91 178.962 516.013 179.036C517.482 184.222 514.108 213.973 511.58 218.519C508.138 218.017 503.397 211.334 500.944 208.396C497.974 204.528 494.645 200.865 491.412 197.205C490.46 203.342 489.642 209.147 488.135 215.186C483.035 210.316 470.998 195.563 467 189.644C473.142 184.321 484.654 177.992 491.802 174L492.875 174.325Z" fill="currentColor"/></svg>';
 const ICONS = {
   close: icon('<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>', 15),
+  minimise: icon('<line x1="5" y1="12" x2="19" y2="12"/>', 15),
+  expand: icon('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>', 15),
   flame: icon(
     '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>'
   ),
   scrollDepth: icon(
     '<line x1="12" y1="3" x2="12" y2="21"/><polyline points="7 8 12 3 17 8"/><polyline points="7 16 12 21 17 16"/>'
   ),
+  camera: icon(
+    '<rect x="3" y="7" width="18" height="13" rx="2"/><circle cx="12" cy="13.5" r="3.5"/><path d="M8 7l1.5-3h5L16 7"/>'
+  ),
   sparkles: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0"><path d="M12 2 L14 10 L22 12 L14 14 L12 22 L10 14 L2 12 L10 10 Z"/></svg>',
-  image: icon(
-    '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>'
+  fileText: icon(
+    '<path d="M7 3h7l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v4h4"/><line x1="8" y1="12" x2="15" y2="12"/><line x1="8" y1="16" x2="15" y2="16"/>'
   ),
   route: icon('<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8 7c0 6 8 4 8 8"/>'),
   chevronDown: icon('<polyline points="6 9 12 15 18 9"/>', 12)
@@ -1863,7 +1940,7 @@ const STYLES = `
     bottom: 20px;
     right: 20px;
     width: 320px;
-    max-height: 70vh;
+    height: min(560px, 70vh);
     background: var(--background);
     color: var(--foreground);
     border: 1px solid var(--border);
@@ -1888,6 +1965,26 @@ const STYLES = `
     cursor: move;
     flex-shrink: 0;
   }
+  .${PREFIX}-root.${PREFIX}-minimised {
+    height: auto;
+    width: auto;
+    border-radius: 999px;
+  }
+  .${PREFIX}-root.${PREFIX}-minimised .${PREFIX}-header {
+    border-bottom: none;
+    padding: 8px 12px;
+    gap: 14px;
+    cursor: default;
+  }
+  .${PREFIX}-root.${PREFIX}-minimised .${PREFIX}-body,
+  .${PREFIX}-root.${PREFIX}-minimised .${PREFIX}-footer {
+    display: none;
+  }
+  .${PREFIX}-minimise {
+    background: none; border: none; color: var(--muted-foreground); cursor: pointer;
+    padding: 4px; border-radius: 4px; display: flex; align-items: center;
+  }
+  .${PREFIX}-minimise:hover { background: var(--accent); color: var(--foreground); }
   .${PREFIX}-title {
     display: inline-flex;
     align-items: center;
@@ -2321,7 +2418,7 @@ const STYLES = `
       width: calc(100vw - 24px);
       right: 12px;
       bottom: 12px;
-      max-height: 80vh;
+      height: min(560px, 80vh);
     }
     .${PREFIX}-toast {
       right: 12px;
@@ -2337,8 +2434,8 @@ let _activeTab = "heatmap";
 let _heatmapFilter = null;
 let _origPushState = null;
 let _hasTrackedTooltipOpened = false;
-let _preferredPanelMinHeight = 0;
 let _moreFormatsExpanded = false;
+let _minimised = false;
 function readStorage(key) {
   try {
     return localStorage.getItem(key);
@@ -2395,7 +2492,7 @@ function handleUrlChange() {
     _heatmapFilter = null;
   }
   if (isHeatmapVisible()) renderHeatmap(getClicks(_allEvents), _heatmapFilter ?? void 0);
-  if (isScrollDepthVisible()) updateScrollDepthOverlay(getScrolls(_allEvents));
+  if (isScrollDepthVisible()) updateScrollDepthOverlay(getScrolls(scopedEvents()));
   render(_panelRoot, _sessions);
 }
 function handleOutsideClickForFormatsMenu(e) {
@@ -2437,13 +2534,22 @@ async function loadSessionData(sessionId) {
 function getClicks(events) {
   return events.filter((e) => e.type === "click");
 }
+function scopedEvents() {
+  return _heatmapFilter ? eventsInVisit(_allEvents, _heatmapFilter) : _allEvents;
+}
 function getScrolls(events) {
   return events.filter((e) => e.type === "scroll");
 }
 function getNavs(events) {
   return events.filter((e) => e.type === "navigation");
 }
-function getStats(events) {
+function getStats(events, visit) {
+  if (visit) {
+    const scoped = eventsInVisit(events, visit);
+    const maxScroll2 = getScrolls(scoped).reduce((m, s) => Math.max(m, s.depth), 0);
+    const visitDuration = scoped.length > 1 ? Math.round((scoped[scoped.length - 1].timestamp - scoped[0].timestamp) / 1e3) : 0;
+    return { clicks: getClicks(scoped).length, pages: 1, duration: visitDuration, maxScroll: maxScroll2 };
+  }
   const navs = getNavs(events);
   const scrolls = getScrolls(events);
   const pages = new Set(navs.map((n) => n.to).filter(Boolean)).size;
@@ -2468,7 +2574,6 @@ async function openPanel() {
     renderHeatmap(getClicks(_allEvents), _heatmapFilter ?? void 0);
     render(_panelRoot, _sessions);
     _panelRoot.style.display = "flex";
-    if (_activeTab === "heatmap") syncPanelMinHeight(_panelRoot);
     pauseClickCapture();
     pauseNavigationCapture();
     pauseScrollCapture();
@@ -2490,7 +2595,6 @@ async function openPanel() {
   _panelRoot.setAttribute("data-ut-no-track", "");
   render(_panelRoot, _sessions);
   document.body.appendChild(_panelRoot);
-  if (_activeTab === "heatmap") syncPanelMinHeight(_panelRoot);
   _origPushState = history.pushState.bind(history);
   history.pushState = function(state, title, url) {
     _origPushState(state, title, url);
@@ -2504,7 +2608,7 @@ async function openPanel() {
   pauseScrollCapture();
 }
 function render(root, sessions) {
-  const stats = getStats(_allEvents);
+  const stats = getStats(_allEvents, _heatmapFilter ?? void 0);
   const sessionOptions = sessions.map(
     (s) => `<option value="${s.sessionId}" ${s.sessionId === _currentSessionId ? "selected" : ""}>
           ${s.sessionId.slice(0, 8)} (${s.eventCount} events)
@@ -2556,10 +2660,14 @@ function render(root, sessions) {
       ${buildTimelineHTML(_allEvents, _currentSessionId)}
     </div>
   `;
+  root.classList.toggle(`${PREFIX}-minimised`, _minimised);
   root.innerHTML = `
     <div class="${PREFIX}-header">
       <span class="${PREFIX}-title"><span class="${PREFIX}-title-icon">${LOGO_MARK}</span>Recap</span>
-      <button class="${PREFIX}-close" aria-label="Close panel">${ICONS.close}</button>
+      <div style="display:flex;align-items:center;gap:4px;">
+        <button class="${PREFIX}-minimise" id="${PREFIX}-btn-minimise" aria-label="${_minimised ? "Expand panel" : "Minimise panel"}">${_minimised ? ICONS.expand : ICONS.minimise}</button>
+        <button class="${PREFIX}-close" aria-label="Close panel">${ICONS.close}</button>
+      </div>
     </div>
     <div class="${PREFIX}-body">
       <div class="${PREFIX}-content-scroll">
@@ -2605,18 +2713,15 @@ function render(root, sessions) {
       <div class="${PREFIX}-section" style="margin-top:12px;margin-bottom:0;">
         <div class="${PREFIX}-label">Export</div>
         <button class="${PREFIX}-export-primary" id="${PREFIX}-btn-ai">${ICONS.sparkles}<span>Export for AI</span></button>
-        <div class="${PREFIX}-exports">
-          <button class="${PREFIX}-btn" id="${PREFIX}-btn-screenshot">Screenshot</button>
-          <button class="${PREFIX}-btn" id="${PREFIX}-btn-json">Raw JSON</button>
-          <button class="${PREFIX}-btn" id="${PREFIX}-btn-csv">CSV</button>
-        </div>
         <div class="${PREFIX}-more-formats-wrap">
           <button class="${PREFIX}-more-formats ${_moreFormatsExpanded ? "expanded" : ""}" id="${PREFIX}-btn-toggle-more-formats">
-            <span>More formats</span>
+            <span>More exports</span>
             ${ICONS.chevronDown}
           </button>
           ${_moreFormatsExpanded ? `<div class="${PREFIX}-formats-menu" role="menu">
-                   <button class="${PREFIX}-formats-menu-item" id="${PREFIX}-btn-heatmap-png" role="menuitem">${ICONS.image}<span>Heatmap PNG</span></button>
+                   <button class="${PREFIX}-formats-menu-item" id="${PREFIX}-btn-json" role="menuitem">${ICONS.fileText}<span>JSON</span></button>
+                   <button class="${PREFIX}-formats-menu-item" id="${PREFIX}-btn-csv" role="menuitem">${ICONS.fileText}<span>CSV</span></button>
+                   <button class="${PREFIX}-formats-menu-item" id="${PREFIX}-btn-screenshot" role="menuitem">${ICONS.camera}<span>Screenshot</span></button>
                    <button class="${PREFIX}-formats-menu-item" id="${PREFIX}-btn-flow" role="menuitem">${ICONS.route}<span>Flow SVG</span></button>
                  </div>` : ""}
         </div>
@@ -2627,23 +2732,15 @@ function render(root, sessions) {
     </div>
   `;
   bindEvents(root);
-  syncPanelMinHeight(root);
-}
-function syncPanelMinHeight(root) {
-  if (_activeTab === "heatmap") {
-    root.style.minHeight = "";
-    const measuredHeight = Math.round(root.getBoundingClientRect().height);
-    if (measuredHeight > 0) {
-      _preferredPanelMinHeight = measuredHeight;
-    }
-  }
-  if (_preferredPanelMinHeight <= 0) return;
-  const maxAllowedHeight = Math.floor(window.innerHeight * 0.7);
-  root.style.minHeight = `${Math.min(_preferredPanelMinHeight, maxAllowedHeight)}px`;
 }
 function bindEvents(root) {
   root.querySelector(`.${PREFIX}-close`)?.addEventListener("click", () => {
     closePanel();
+  });
+  root.querySelector(`#${PREFIX}-btn-minimise`)?.addEventListener("click", () => {
+    _minimised = !_minimised;
+    _moreFormatsExpanded = false;
+    render(root, _sessions);
   });
   root.querySelector(`#${PREFIX}-session-select`)?.addEventListener("change", async (e) => {
     _currentSessionId = e.target.value;
@@ -2690,18 +2787,16 @@ function bindEvents(root) {
       if (!visit) return;
       const totalVisits = timeline.filter((v) => v.pagePath === visit.pagePath).length;
       const label = totalVisits > 1 ? `visit ${visit.visitNumber} of ${totalVisits}` : "";
-      _heatmapFilter = {
-        pagePath: visit.pagePath,
-        visitStartMs: visit.arrivalTime * 1e3,
-        visitEndMs: visit.duration !== null ? (visit.arrivalTime + visit.duration) * 1e3 : null,
-        label
-      };
+      const sessionStartMs = _allEvents.reduce((min, e) => Math.min(min, e.timestamp), Infinity);
+      const range = visitWindowMs(visit, sessionStartMs, visitIndex === timeline.length - 1);
+      _heatmapFilter = { pagePath: visit.pagePath, ...range, label };
       if (location.pathname !== visit.pagePath) {
         (_origPushState ?? history.pushState).call(history, null, "", visit.pagePath);
         window.dispatchEvent(new PopStateEvent("popstate"));
       }
       renderHeatmap(getClicks(_allEvents), _heatmapFilter);
       if (!isHeatmapVisible()) showHeatmap();
+      if (isScrollDepthVisible()) updateScrollDepthOverlay(getScrolls(scopedEvents()));
       render(_panelRoot, _sessions);
     });
   });
@@ -2714,7 +2809,7 @@ function bindEvents(root) {
     if (isHeatmapVisible()) {
       hideHeatmap();
     } else {
-      renderHeatmap(getClicks(_allEvents));
+      renderHeatmap(getClicks(_allEvents), _heatmapFilter ?? void 0);
       showHeatmap();
     }
     render(root, _sessions);
@@ -2723,15 +2818,21 @@ function bindEvents(root) {
     if (isScrollDepthVisible()) {
       hideScrollDepthOverlay();
     } else {
-      showScrollDepthOverlay(getScrolls(_allEvents));
+      showScrollDepthOverlay(getScrolls(scopedEvents()));
     }
     render(root, _sessions);
   });
   root.querySelector(`#${PREFIX}-btn-screenshot`)?.addEventListener("click", () => {
-    closePanel();
-    renderHeatmap(getClicks(_allEvents));
+    _moreFormatsExpanded = false;
+    _minimised = true;
+    if (_panelRoot) _panelRoot.style.display = "none";
+    renderHeatmap(getClicks(_allEvents), _heatmapFilter ?? void 0);
     showHeatmap();
-    enterScreenshotMode();
+    enterScreenshotMode(() => {
+      if (!_panelRoot) return;
+      _panelRoot.style.display = "flex";
+      render(_panelRoot, _sessions);
+    });
   });
   root.querySelector(`#${PREFIX}-btn-ai`)?.addEventListener("click", () => {
     const sessionName = getSessionName() ?? void 0;
@@ -2745,6 +2846,8 @@ function bindEvents(root) {
   });
   root.querySelector(`#${PREFIX}-btn-json`)?.addEventListener("click", () => {
     const didExport = exportJSON(_allEvents, getSessionName() ?? void 0);
+    _moreFormatsExpanded = false;
+    render(root, _sessions);
     if (didExport) {
       showToast("JSON exported!");
     } else {
@@ -2753,18 +2856,13 @@ function bindEvents(root) {
   });
   root.querySelector(`#${PREFIX}-btn-csv`)?.addEventListener("click", () => {
     const didExport = exportCSV(_allEvents, getSessionName() ?? void 0);
+    _moreFormatsExpanded = false;
+    render(root, _sessions);
     if (didExport) {
       showToast("CSV exported!");
     } else {
       showToast("CSV export failed. Check browser download permissions.", 3e3, "error");
     }
-  });
-  root.querySelector(`#${PREFIX}-btn-heatmap-png`)?.addEventListener("click", () => {
-    renderHeatmap(getClicks(_allEvents));
-    downloadHeatmapPNG();
-    _moreFormatsExpanded = false;
-    render(root, _sessions);
-    showToast("Heatmap PNG downloaded!");
   });
   root.querySelector(`#${PREFIX}-btn-flow`)?.addEventListener("click", () => {
     const didExport = downloadFlowDiagram(getNavs(_allEvents), getSessionName() ?? void 0);
