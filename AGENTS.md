@@ -28,7 +28,7 @@ app owner controls:
 | Dashboard | `dashboard/` | Static React app the owner deploys and signs in to |
 | Web prototypes | `src/` | The original `recap-ux` script for web prototypes (separate, unchanged) |
 
-Supported today: **React Native 0.72+ and Expo SDK 50+, iOS and Android.** Native Swift/Kotlin and Flutter
+Supported today: **React Native 0.72+ and Expo SDK 50+ (tested on SDK 54 and 58), iOS and Android.** Native Swift/Kotlin and Flutter
 are not available yet. If the app is not React Native, tell the developer that and stop.
 
 ## Step 0. Check the project
@@ -257,6 +257,7 @@ that) or build your own views.
 - Dashboard: `cd dashboard && npm install && npm test && npm run build` (`npm run demo` runs it with sample data, no database)
 - End-to-end test and a working example app: `examples/expo-test-shop/` (see its README)
 - What is and isn't tested yet: `docs/testing.md`
+- Hands-on trial on a phone (for people, not agents): `docs/try-it-on-your-phone.md`
 - Database checks against a scratch Postgres:
   `psql -f supabase/tests/supabase-shim.sql -f supabase/migrations/20261126000000_recap.sql -f supabase/tests/security.sql`
 - The web library in `src/` has its own tests: `npm install && npm test` at the root.

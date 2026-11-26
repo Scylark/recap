@@ -105,7 +105,7 @@ export class RecapCore {
     };
     this.transport =
       config.transport ??
-      (config.supabase
+      (config.supabase?.url && config.supabase.anonKey
         ? supabaseTransport(config.supabase)
         : config.endpoint
           ? endpointTransport(config.endpoint)

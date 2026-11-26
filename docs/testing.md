@@ -2,7 +2,7 @@
 
 | What | How | Where |
 | --- | --- | --- |
-| SDK logic: sessions, consent, sampling, offline queue, batching, tap labels, start-up buffering | 12 unit tests | `sdk-react-native/tests/` |
+| SDK logic: sessions, consent, sampling, offline queue, batching, tap labels, start-up buffering, Supabase key headers | 14 unit tests | `sdk-react-native/tests/` |
 | Database: ingest, counters, app isolation, anon can't read, only team members can read, viewers can't delete, admin tools, retention | SQL checks on a real Postgres | `supabase/tests/security.sql` |
 | AI summary built from mobile events | 3 unit tests | `dashboard/tests/` |
 | **End to end**: SDK inside a real Expo app → HTTP → database | Playwright taps through the app as two users on a phone-sized screen, one starting offline | `examples/expo-test-shop/` |
@@ -20,6 +20,9 @@ sessions are the `test-shop` app in the dashboard demo.
 This run found and fixed two bugs: taps were dropped on platforms that only report the finger position in
 `changedTouches` at touch end, and the first screen was missed because the SDK only started recording
 after saved state had loaded.
+
+The example app was then moved to Expo SDK 58 (React Native 0.88, what the current Expo Go app runs)
+and the same run passed again. Its iOS and Android bundles also compile with Hermes.
 
 ## Not yet covered
 

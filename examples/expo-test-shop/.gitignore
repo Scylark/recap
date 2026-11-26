@@ -2,3 +2,5 @@ node_modules/
 dist/
 .expo/
 e2e/screenshots/
+.env
+.env.local

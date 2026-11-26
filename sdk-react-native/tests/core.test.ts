@@ -197,4 +197,34 @@ describe('RecapCore', () => {
     r.screen('Next');
     expect(r.pending()).toHaveLength(0);
   });
+
+  it('sends the right headers for legacy and publishable Supabase keys', async () => {
+    const calls: { url: string; headers: Record<string, string> }[] = [];
+    const g = globalThis as unknown as { fetch: unknown };
+    const orig = g.fetch;
+    g.fetch = async (url: string, init: { headers: Record<string, string> }) => {
+      calls.push({ url, headers: init.headers });
+      return { ok: true, status: 200 };
+    };
+    try {
+      const { supabaseTransport } = await import('../src/transports');
+      const batch = { appId: 'a', sdkVersion: '0', session: { id: 'x', startedAt: '', userId: null, device: {} as never }, events: [] };
+      await supabaseTransport({ url: 'https://p.supabase.co/', anonKey: 'eyJabc' }).send(batch);
+      await supabaseTransport({ url: 'https://p.supabase.co', anonKey: 'sb_publishable_abc' }).send(batch);
+    } finally {
+      g.fetch = orig;
+    }
+    expect(calls[0]!.url).toBe('https://p.supabase.co/rest/v1/rpc/recap_ingest');
+    expect(calls[0]!.headers.Authorization).toBe('Bearer eyJabc');
+    expect(calls[1]!.headers.apikey).toBe('sb_publishable_abc');
+    expect(calls[1]!.headers.Authorization).toBeUndefined();
+  });
+
+  it('runs without uploading when Supabase settings are missing', async () => {
+    const r = new RecapCore(deps);
+    await r.init({ appId: 'test', supabase: { url: '', anonKey: '' } }, device);
+    r.screen('Home');
+    await r.flush();
+    expect(r.pending()).toHaveLength(1);
+  });
 });

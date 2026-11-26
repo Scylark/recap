@@ -25,7 +25,11 @@ export function supabaseTransport(opts: { url: string; anonKey: string }): Trans
     send: (batch: IngestBatch) =>
       postJSON(
         `${base}/rest/v1/rpc/recap_ingest`,
-        { apikey: opts.anonKey, Authorization: `Bearer ${opts.anonKey}` },
+        // Legacy anon keys are JWTs and go in both headers. Newer publishable keys (sb_publishable_...)
+        // go in the apikey header only.
+        opts.anonKey.startsWith('eyJ')
+          ? { apikey: opts.anonKey, Authorization: `Bearer ${opts.anonKey}` }
+          : { apikey: opts.anonKey },
         { payload: batch },
       ),
   };
