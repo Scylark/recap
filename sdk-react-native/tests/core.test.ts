@@ -1,0 +1,177 @@
+import { describe, expect, it, beforeEach } from 'vitest';
+import { RecapCore } from '../src/core';
+import type { IngestBatch, StorageAdapter, Transport } from '../src/types';
+
+function memoryStorage(): StorageAdapter & { data: Map<string, string> } {
+  const data = new Map<string, string>();
+  return {
+    data,
+    getItem: async (k) => data.get(k) ?? null,
+    setItem: async (k, v) => void data.set(k, v),
+    removeItem: async (k) => void data.delete(k),
+  };
+}
+
+function fakeTransport(fail = false): Transport & { batches: IngestBatch[]; fail: boolean } {
+  const t = {
+    batches: [] as IngestBatch[],
+    fail,
+    send: async (b: IngestBatch) => {
+      if (t.fail) throw new Error('offline');
+      t.batches.push(b);
+    },
+  };
+  return t;
+}
+
+let clock = 1_700_000_000_000;
+const deps = {
+  now: () => clock,
+  random: () => 0.42,
+  setInterval: () => null,
+  clearInterval: () => undefined,
+};
+const device = { platform: 'ios' as const, screenWidth: 400, screenHeight: 800 };
+
+describe('RecapCore', () => {
+  beforeEach(() => {
+    clock = 1_700_000_000_000;
+  });
+
+  it('records screens, taps and scroll milestones and uploads them', async () => {
+    const transport = fakeTransport();
+    const r = new RecapCore(deps);
+    await r.init({ appId: 'test', transport }, device);
+
+    r.screen('Home');
+    clock += 1000;
+    r.tap({ x: 200, y: 400 });
+    r.scroll(30);
+    r.scroll(40); // no new milestone
+    r.scroll(80);
+    r.screen('Home'); // same screen, ignored
+    r.screen('Basket');
+    await r.flush();
+
+    expect(transport.batches).toHaveLength(1);
+    const b = transport.batches[0]!;
+    expect(b.appId).toBe('test');
+    expect(b.session.device.platform).toBe('ios');
+    expect(b.events.map((e) => e.type)).toEqual(['screen', 'tap', 'scroll', 'scroll', 'screen']);
+    expect(b.events[1]!.data).toMatchObject({ nx: 0.5, ny: 0.5, label: null });
+    expect(b.events[1]!.t).toBe(1000);
+    expect(b.events[1]!.screen).toBe('Home');
+    expect(b.events[3]!.data).toMatchObject({ depth: 75, maxDepth: 80 });
+    expect(b.events[4]!.data).toMatchObject({ from: 'Home' });
+    expect(r.pending()).toHaveLength(0);
+  });
+
+  it('labels a tap from a press handler fired just after it', async () => {
+    const transport = fakeTransport();
+    const r = new RecapCore(deps);
+    await r.init({ appId: 'test', transport }, device);
+    r.screen('Home');
+    r.tap({ x: 10, y: 10 });
+    clock += 100;
+    r.labelTap('Buy now');
+    expect(r.pending()[1]!.data.label).toBe('Buy now');
+  });
+
+  it('labels the next tap when the press handler fires first', async () => {
+    const r = new RecapCore(deps);
+    await r.init({ appId: 'test', transport: fakeTransport() }, device);
+    r.labelTap('Menu');
+    clock += 50;
+    r.tap({ x: 1, y: 1 });
+    expect(r.pending()[0]!.data.label).toBe('Menu');
+  });
+
+  it('records nothing until consent when requireConsent is on', async () => {
+    const storage = memoryStorage();
+    const r = new RecapCore(deps);
+    await r.init({ appId: 'test', transport: fakeTransport(), requireConsent: true, storage }, device);
+    r.screen('Home');
+    expect(r.pending()).toHaveLength(0);
+    await r.optIn();
+    r.screen('Settings');
+    expect(r.pending()).toHaveLength(1);
+    expect(storage.data.get('recap:consent')).toBe('granted');
+  });
+
+  it('optOut stops recording and clears the queue', async () => {
+    const r = new RecapCore(deps);
+    await r.init({ appId: 'test', transport: fakeTransport(true) }, device);
+    r.screen('Home');
+    await r.optOut();
+    r.screen('Other');
+    expect(r.pending()).toHaveLength(0);
+    expect(r.isRecording()).toBe(false);
+  });
+
+  it('respects sampleRate', async () => {
+    const r = new RecapCore(deps); // random() is 0.42
+    await r.init({ appId: 'test', transport: fakeTransport(), sampleRate: 0.25 }, device);
+    r.screen('Home');
+    expect(r.isRecording()).toBe(false);
+    expect(r.pending()).toHaveLength(0);
+  });
+
+  it('keeps events offline and restores them on the next launch', async () => {
+    const storage = memoryStorage();
+    const offline = fakeTransport(true);
+    const first = new RecapCore(deps);
+    await first.init({ appId: 'test', transport: offline, storage }, device);
+    first.screen('Home');
+    first.tap({ x: 5, y: 5 });
+    await first.flush();
+    expect(first.pending()).toHaveLength(2);
+
+    const online = fakeTransport();
+    const second = new RecapCore(deps);
+    await second.init({ appId: 'test', transport: online, storage }, device);
+    await second.flush();
+    expect(online.batches).toHaveLength(1);
+    expect(online.batches[0]!.events).toHaveLength(2);
+    expect(online.batches[0]!.session.id).toBe(first.getSessionId());
+  });
+
+  it('caps the offline queue', async () => {
+    const r = new RecapCore(deps);
+    await r.init({ appId: 'test', transport: fakeTransport(true), maxQueueSize: 5, maxBatchSize: 100 }, device);
+    for (let i = 0; i < 10; i++) r.track('e', { i });
+    expect(r.pending()).toHaveLength(5);
+    expect(r.pending()[0]!.data.i).toBe(5);
+  });
+
+  it('starts a new session after a long time in the background', async () => {
+    const transport = fakeTransport();
+    const r = new RecapCore(deps);
+    await r.init({ appId: 'test', transport, sessionTimeoutMs: 60_000 }, device);
+    r.screen('Home');
+    const firstId = r.getSessionId();
+    r.appState('background');
+    clock += 10_000;
+    r.appState('active');
+    expect(r.getSessionId()).toBe(firstId);
+    r.appState('background');
+    clock += 120_000;
+    r.appState('active');
+    expect(r.getSessionId()).not.toBe(firstId);
+    await r.flush();
+    const ids = new Set(transport.batches.map((b) => b.session.id));
+    expect(ids.size).toBe(2);
+    const last = transport.batches[transport.batches.length - 1]!;
+    expect(last.events[0]).toMatchObject({ type: 'screen', screen: 'Home', t: 0 });
+  });
+
+  it('splits uploads into batches', async () => {
+    const transport = fakeTransport();
+    const r = new RecapCore(deps);
+    await r.init({ appId: 'test', transport, maxBatchSize: 3 }, device);
+    transport.fail = true; // hold everything back while we record
+    for (let i = 0; i < 7; i++) r.track('e');
+    transport.fail = false;
+    await r.flush();
+    expect(transport.batches.map((b) => b.events.length)).toEqual([3, 3, 1]);
+  });
+});

@@ -1,0 +1,382 @@
+// Recap core: session handling, consent, sampling, the offline queue and uploads.
+// Pure TypeScript with no React Native imports, so it runs (and is tested) anywhere.
+
+import { endpointTransport, supabaseTransport } from './transports';
+import type {
+  DeviceInfo,
+  IngestBatch,
+  RecapConfig,
+  RecapEvent,
+  RecapEventType,
+  SessionInfo,
+  StorageAdapter,
+  TapInput,
+  Transport,
+} from './types';
+
+export const SDK_VERSION = '0.1.0';
+
+const KEY_QUEUE = 'recap:queue';
+const KEY_CONSENT = 'recap:consent';
+
+/** A label arriving this close to a tap (either side) is attached to that tap. */
+const LABEL_WINDOW_MS = 600;
+const SCROLL_MILESTONES = [25, 50, 75, 100];
+
+type ConsentState = 'granted' | 'denied' | 'unknown';
+
+interface QueuedEvent extends RecapEvent {
+  sessionId: string;
+}
+
+export interface CoreDeps {
+  now?: () => number;
+  random?: () => number;
+  setInterval?: (fn: () => void, ms: number) => unknown;
+  clearInterval?: (handle: unknown) => void;
+}
+
+const DEFAULT_DEVICE: DeviceInfo = {
+  platform: 'other',
+  osVersion: null,
+  model: null,
+  appVersion: null,
+  screenWidth: 0,
+  screenHeight: 0,
+  locale: null,
+};
+
+export function uuid(random: () => number = Math.random): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+    const r = Math.floor(random() * 16);
+    return (ch === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+export class RecapCore {
+  private config: RecapConfig | null = null;
+  private transport: Transport | null = null;
+  private storage: StorageAdapter | null = null;
+  private device: DeviceInfo = DEFAULT_DEVICE;
+
+  private session: SessionInfo | null = null;
+  private sessionStartMs = 0;
+  private sampled = true;
+  private consent: ConsentState = 'unknown';
+  private userId: string | null = null;
+
+  private queue: QueuedEvent[] = [];
+  private sessions = new Map<string, SessionInfo>();
+  private inFlight: Promise<void> | null = null;
+  private timer: unknown = null;
+  private backgroundedAt: number | null = null;
+
+  private currentScreen: string | null = null;
+  private scrollMax = new Map<string, number>();
+  private pendingLabel: { label: string; at: number } | null = null;
+
+  private readonly now: () => number;
+  private readonly random: () => number;
+  private readonly setIntervalFn: (fn: () => void, ms: number) => unknown;
+  private readonly clearIntervalFn: (handle: unknown) => void;
+
+  constructor(deps: CoreDeps = {}) {
+    this.now = deps.now ?? (() => Date.now());
+    this.random = deps.random ?? Math.random;
+    this.setIntervalFn = deps.setInterval ?? ((fn, ms) => setInterval(fn, ms));
+    this.clearIntervalFn =
+      deps.clearInterval ?? ((h) => clearInterval(h as ReturnType<typeof setInterval>));
+  }
+
+  // ---------------------------------------------------------------- setup
+
+  async init(config: RecapConfig, device: Partial<DeviceInfo> = {}): Promise<void> {
+    if (!config.appId) throw new Error('Recap: appId is required');
+    this.config = config;
+    this.storage = config.storage ?? null;
+    this.device = {
+      ...DEFAULT_DEVICE,
+      ...device,
+      appVersion: config.appVersion ?? device.appVersion ?? null,
+    };
+    this.transport =
+      config.transport ??
+      (config.supabase
+        ? supabaseTransport(config.supabase)
+        : config.endpoint
+          ? endpointTransport(config.endpoint)
+          : null);
+    if (!this.transport) this.log('no transport configured; events stay on the device');
+
+    if (this.storage) {
+      try {
+        const saved = await this.storage.getItem(KEY_CONSENT);
+        if (saved === 'granted' || saved === 'denied') this.consent = saved;
+        const raw = await this.storage.getItem(KEY_QUEUE);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { queue?: QueuedEvent[]; sessions?: SessionInfo[] };
+          for (const s of parsed.sessions ?? []) this.sessions.set(s.id, s);
+          this.queue = (parsed.queue ?? []).filter((e) => this.sessions.has(e.sessionId));
+        }
+      } catch (err) {
+        this.log('could not restore saved state', err);
+      }
+    }
+
+    this.startSession();
+    if (this.timer) this.clearIntervalFn(this.timer);
+    this.timer = this.setIntervalFn(() => void this.flush(), config.flushIntervalMs ?? 10_000);
+  }
+
+  async shutdown(): Promise<void> {
+    if (this.timer) this.clearIntervalFn(this.timer);
+    this.timer = null;
+    await this.flush();
+  }
+
+  // ---------------------------------------------------------------- consent
+
+  /** Whether events are currently being recorded. */
+  isRecording(): boolean {
+    if (!this.config || !this.sampled) return false;
+    if (this.consent === 'denied') return false;
+    if (this.config.requireConsent && this.consent !== 'granted') return false;
+    return true;
+  }
+
+  async optIn(): Promise<void> {
+    this.consent = 'granted';
+    await this.storage?.setItem(KEY_CONSENT, 'granted');
+  }
+
+  /** Stops recording and deletes anything not yet uploaded. */
+  async optOut(): Promise<void> {
+    this.consent = 'denied';
+    this.queue = [];
+    await this.storage?.setItem(KEY_CONSENT, 'denied');
+    await this.persist();
+  }
+
+  /**
+   * Attach your own user id (or null to clear it). Use an internal id, never an email address.
+   * Takes effect from the next upload of the current session.
+   */
+  setUserId(id: string | null): void {
+    this.userId = id;
+    if (this.session) {
+      this.session = { ...this.session, userId: id };
+      this.sessions.set(this.session.id, this.session);
+    }
+  }
+
+  getSessionId(): string | null {
+    return this.session?.id ?? null;
+  }
+
+  // ---------------------------------------------------------------- capture
+
+  screen(name: string, props: Record<string, unknown> = {}): void {
+    if (!name || name === this.currentScreen) return;
+    const from = this.currentScreen;
+    this.currentScreen = name;
+    this.record('screen', { from, ...props });
+  }
+
+  tap(input: TapInput): void {
+    const w = this.device.screenWidth || 1;
+    const h = this.device.screenHeight || 1;
+    let label = input.label ?? null;
+    const t = this.now();
+    if (!label && this.pendingLabel && t - this.pendingLabel.at <= LABEL_WINDOW_MS) {
+      label = this.pendingLabel.label;
+    }
+    this.pendingLabel = null;
+    this.record('tap', {
+      x: Math.round(input.x),
+      y: Math.round(input.y),
+      nx: clamp01(input.x / w),
+      ny: clamp01(input.y / h),
+      label,
+    });
+  }
+
+  /**
+   * Name the thing the user just pressed. Call it from onPress, or use recapPress().
+   * It labels the tap recorded just before or just after it.
+   */
+  labelTap(label: string): void {
+    const t = this.now();
+    for (let i = this.queue.length - 1; i >= 0; i--) {
+      const e = this.queue[i]!;
+      if (e.type !== 'tap') continue;
+      const tapAt = this.sessionStartMs + e.t;
+      if (t - tapAt <= LABEL_WINDOW_MS && e.data.label == null && e.sessionId === this.session?.id) {
+        e.data.label = label;
+        return;
+      }
+      break;
+    }
+    this.pendingLabel = { label, at: t };
+  }
+
+  /** Report scroll depth (0 to 100) for the current screen. Only milestones and new maximums are kept. */
+  scroll(depth: number, screen: string | null = this.currentScreen): void {
+    const key = screen ?? '';
+    const d = Math.max(0, Math.min(100, Math.round(depth)));
+    const prev = this.scrollMax.get(key) ?? 0;
+    if (d <= prev) return;
+    this.scrollMax.set(key, d);
+    const crossed = SCROLL_MILESTONES.filter((m) => prev < m && d >= m);
+    if (crossed.length === 0) return;
+    this.record('scroll', { depth: crossed[crossed.length - 1], maxDepth: d });
+  }
+
+  track(name: string, props: Record<string, unknown> = {}): void {
+    this.record('custom', { name, ...props });
+  }
+
+  /** Call with the React Native AppState value. Starts a fresh session after a long time away. */
+  appState(state: string): void {
+    const t = this.now();
+    if (state === 'background' || state === 'inactive') {
+      if (this.backgroundedAt !== null) return;
+      this.backgroundedAt = t;
+      this.record('app_state', { state: 'background' });
+      void this.flush();
+      return;
+    }
+    if (state === 'active' && this.backgroundedAt !== null) {
+      const away = t - this.backgroundedAt;
+      this.backgroundedAt = null;
+      const timeout = this.config?.sessionTimeoutMs ?? 30 * 60_000;
+      if (away >= timeout) {
+        const screen = this.currentScreen;
+        this.startSession();
+        if (screen) this.screen(screen, { resumed: true });
+      } else {
+        this.record('app_state', { state: 'active', awayMs: away });
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- upload
+
+  /** Upload everything queued. Safe to call at any time; overlapping calls wait for each other. */
+  async flush(): Promise<void> {
+    while (this.inFlight) await this.inFlight;
+    if (!this.transport || this.queue.length === 0 || this.consent === 'denied') return;
+    this.inFlight = this.upload();
+    try {
+      await this.inFlight;
+    } finally {
+      this.inFlight = null;
+    }
+  }
+
+  private async upload(): Promise<void> {
+    const transport = this.transport!;
+    try {
+      const max = this.config?.maxBatchSize ?? 50;
+      // Uploads go one session at a time, oldest first.
+      while (this.queue.length > 0) {
+        const sessionId = this.queue[0]!.sessionId;
+        const session = this.sessions.get(sessionId);
+        const batch: QueuedEvent[] = [];
+        for (const e of this.queue) {
+          if (e.sessionId !== sessionId) continue;
+          batch.push(e);
+          if (batch.length >= max) break;
+        }
+        if (!session) {
+          this.queue = this.queue.filter((e) => e.sessionId !== sessionId);
+          continue;
+        }
+        const payload: IngestBatch = {
+          appId: this.config!.appId,
+          sdkVersion: SDK_VERSION,
+          session,
+          events: batch.map(({ sessionId: _s, ...e }) => e),
+        };
+        await transport.send(payload);
+        const sent = new Set(batch);
+        this.queue = this.queue.filter((e) => !sent.has(e));
+        this.log(`uploaded ${batch.length} events`);
+      }
+      this.pruneSessions();
+    } catch (err) {
+      this.log('upload failed; will retry', err);
+    } finally {
+      await this.persist();
+    }
+  }
+
+  /** Events waiting to be uploaded. Useful for tests and an in-app debug view. */
+  pending(): readonly RecapEvent[] {
+    return this.queue;
+  }
+
+  // ---------------------------------------------------------------- internals
+
+  private startSession(): void {
+    this.sessionStartMs = this.now();
+    const rate = this.config?.sampleRate ?? 1;
+    this.sampled = rate >= 1 || this.random() < rate;
+    this.currentScreen = null;
+    this.scrollMax.clear();
+    this.pendingLabel = null;
+    this.session = {
+      id: uuid(this.random),
+      startedAt: new Date(this.sessionStartMs).toISOString(),
+      userId: this.userId,
+      device: this.device,
+    };
+    this.sessions.set(this.session.id, this.session);
+    this.log(`session ${this.session.id} started${this.sampled ? '' : ' (not sampled)'}`);
+  }
+
+  private record(type: RecapEventType, data: Record<string, unknown>): void {
+    if (!this.isRecording() || !this.session) return;
+    const t = this.now();
+    this.queue.push({
+      sessionId: this.session.id,
+      type,
+      t: Math.max(0, t - this.sessionStartMs),
+      at: new Date(t).toISOString(),
+      screen: this.currentScreen,
+      data,
+    });
+    const max = this.config?.maxQueueSize ?? 1000;
+    if (this.queue.length > max) this.queue.splice(0, this.queue.length - max);
+    if (this.queue.length >= (this.config?.maxBatchSize ?? 50)) void this.flush();
+  }
+
+  private pruneSessions(): void {
+    const live = new Set(this.queue.map((e) => e.sessionId));
+    if (this.session) live.add(this.session.id);
+    for (const id of this.sessions.keys()) if (!live.has(id)) this.sessions.delete(id);
+  }
+
+  private async persist(): Promise<void> {
+    if (!this.storage) return;
+    try {
+      this.pruneSessions();
+      await this.storage.setItem(
+        KEY_QUEUE,
+        JSON.stringify({ queue: this.queue, sessions: [...this.sessions.values()] }),
+      );
+    } catch (err) {
+      this.log('could not save queue', err);
+    }
+  }
+
+  private log(...args: unknown[]): void {
+    if (this.config?.debug) console.log('[Recap]', ...args);
+  }
+}
+
+function clamp01(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(1, Math.round(n * 1000) / 1000));
+}
