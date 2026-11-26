@@ -25,20 +25,54 @@ export function sinceDays(days: number): string {
   return new Date(Date.now() - days * 86_400_000).toISOString();
 }
 
-/** Tiny hash router: #/sessions, #/session/<id>, etc. Works on any static host with no rewrites. */
+/**
+ * Tiny router: #/sessions, #/session/<id>, etc. Works on any static host with no rewrites.
+ * Navigation goes through go(), which also works inside sandboxed frames that ignore hash links.
+ */
+let current = readHash();
+const listeners = new Set<() => void>();
+
+function readHash(): string {
+  return window.location.hash.replace(/^#\/?/, '') || 'overview';
+}
+
 export function useRoute(): string[] {
-  const read = () => (window.location.hash.replace(/^#\/?/, '') || 'overview').split('/');
-  const [route, setRoute] = useState(read);
+  const [route, setRoute] = useState(current);
   useEffect(() => {
-    const on = () => setRoute(read());
-    window.addEventListener('hashchange', on);
-    return () => window.removeEventListener('hashchange', on);
+    const on = () => setRoute(current);
+    const onHash = () => {
+      current = readHash();
+      listeners.forEach((l) => l());
+    };
+    listeners.add(on);
+    window.addEventListener('hashchange', onHash);
+    return () => {
+      listeners.delete(on);
+      window.removeEventListener('hashchange', onHash);
+    };
   }, []);
-  return route;
+  return route.split('/');
 }
 
 export function go(path: string): void {
-  window.location.hash = `#/${path}`;
+  current = path || 'overview';
+  try {
+    window.history.replaceState(null, '', `#/${current}`);
+  } catch {
+    /* sandboxed frame */
+  }
+  listeners.forEach((l) => l());
+  window.scrollTo(0, 0);
+}
+
+/** Send clicks on in-app links (href="#/...") through go(). Call once at startup. */
+export function interceptLinks(): void {
+  document.addEventListener('click', (e) => {
+    const a = (e.target as Element | null)?.closest?.('a[href^="#/"]');
+    if (!a || e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    e.preventDefault();
+    go(a.getAttribute('href')!.slice(2));
+  });
 }
 
 /** Load async data with loading and error states. */

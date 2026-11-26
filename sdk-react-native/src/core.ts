@@ -68,6 +68,8 @@ export class RecapCore {
   private userId: string | null = null;
 
   private queue: QueuedEvent[] = [];
+  /** Events recorded while saved state is still loading. */
+  private early: QueuedEvent[] | null = null;
   private sessions = new Map<string, SessionInfo>();
   private inFlight: Promise<void> | null = null;
   private timer: unknown = null;
@@ -110,6 +112,11 @@ export class RecapCore {
           : null);
     if (!this.transport) this.log('no transport configured; events stay on the device');
 
+    // Start recording straight away; events captured while saved state loads are held back
+    // until we know the user's stored consent choice.
+    this.startSession();
+    this.early = [];
+
     if (this.storage) {
       try {
         const saved = await this.storage.getItem(KEY_CONSENT);
@@ -125,7 +132,11 @@ export class RecapCore {
       }
     }
 
-    this.startSession();
+    const early = this.early;
+    this.early = null;
+    if (this.session) this.sessions.set(this.session.id, this.session);
+    if (this.isRecording()) for (const e of early) this.enqueue(e);
+
     if (this.timer) this.clearIntervalFn(this.timer);
     this.timer = this.setIntervalFn(() => void this.flush(), config.flushIntervalMs ?? 10_000);
   }
@@ -337,16 +348,27 @@ export class RecapCore {
   }
 
   private record(type: RecapEventType, data: Record<string, unknown>): void {
-    if (!this.isRecording() || !this.session) return;
+    if (!this.session) return;
     const t = this.now();
-    this.queue.push({
+    const event: QueuedEvent = {
       sessionId: this.session.id,
       type,
       t: Math.max(0, t - this.sessionStartMs),
       at: new Date(t).toISOString(),
       screen: this.currentScreen,
       data,
-    });
+    };
+    if (this.early) {
+      // Still loading: keep it unless consent is clearly off, decide once loaded.
+      if (this.sampled && this.consent !== 'denied' && this.early.length < 200) this.early.push(event);
+      return;
+    }
+    if (!this.isRecording()) return;
+    this.enqueue(event);
+  }
+
+  private enqueue(event: QueuedEvent): void {
+    this.queue.push(event);
     const max = this.config?.maxQueueSize ?? 1000;
     if (this.queue.length > max) this.queue.splice(0, this.queue.length - max);
     if (this.queue.length >= (this.config?.maxBatchSize ?? 50)) void this.flush();

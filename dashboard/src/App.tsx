@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { listApps, myRole } from './lib/data';
-import { isConfigured, supabase } from './lib/supabase';
+import { isConfigured, isDemo, supabase } from './lib/supabase';
 import { readPref, sinceDays, useAsync, useRoute, writePref } from './lib/util';
 import { Heatmaps } from './pages/Heatmaps';
 import { Login, NotConfigured, NotMember } from './pages/Login';
@@ -21,13 +21,14 @@ export function App() {
   const [auth, setAuth] = useState<Session | null | undefined>(undefined);
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase || isDemo) return;
     supabase.auth.getSession().then(({ data }) => setAuth(data.session));
     const { data } = supabase.auth.onAuthStateChange((_e, s) => setAuth(s));
     return () => data.subscription.unsubscribe();
   }, []);
 
   if (!isConfigured) return <NotConfigured />;
+  if (isDemo) return <SignedIn email="demo@example.com" />;
   if (auth === undefined) return <div className="centre muted">Loading…</div>;
   if (!auth) return <Login />;
   return <SignedIn email={auth.user.email ?? ''} />;
@@ -83,6 +84,12 @@ function SignedIn({ email }: { email: string }) {
 
   return (
     <div className="shell">
+      {isDemo && (
+        <div className="demo-banner">
+          Demo with sample data. The <strong>test-shop</strong> app holds the real sessions from our end-to-end test run;{' '}
+          <strong>demo-shop</strong> is generated sample data. Nothing you do here is saved.
+        </div>
+      )}
       <header>
         <div className="brand">
           <img src="./favicon.svg" alt="" width={24} height={24} /> Recap
@@ -108,9 +115,11 @@ function SignedIn({ email }: { email: string }) {
               </option>
             ))}
           </select>
-          <button className="link" onClick={signOut} title={email}>
-            Sign out
-          </button>
+          {!isDemo && (
+            <button className="link" onClick={signOut} title={email}>
+              Sign out
+            </button>
+          )}
         </div>
       </header>
       <main>{body}</main>

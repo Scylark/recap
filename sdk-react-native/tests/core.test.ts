@@ -174,4 +174,27 @@ describe('RecapCore', () => {
     await r.flush();
     expect(transport.batches.map((b) => b.events.length)).toEqual([3, 3, 1]);
   });
+  it('keeps events recorded while saved state is still loading', async () => {
+    const storage = memoryStorage();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slow: StorageAdapter = { ...storage, getItem: async (k) => (await gate, storage.getItem(k)) };
+    const r = new RecapCore(deps);
+    const ready = r.init({ appId: 'test', transport: fakeTransport(), storage: slow }, device);
+    r.screen('Home'); // app renders its first screen before storage answers
+    release();
+    await ready;
+    expect(r.pending().map((e) => e.screen)).toEqual(['Home']);
+  });
+
+  it('drops early events if the user had opted out on a previous launch', async () => {
+    const storage = memoryStorage();
+    storage.data.set('recap:consent', 'denied');
+    const r = new RecapCore(deps);
+    const ready = r.init({ appId: 'test', transport: fakeTransport(), storage }, device);
+    r.screen('Home');
+    await ready;
+    r.screen('Next');
+    expect(r.pending()).toHaveLength(0);
+  });
 });

@@ -37,6 +37,21 @@ export interface RecapProviderProps {
 const TAP_MAX_MOVE = 12; // points
 const TAP_MAX_MS = 600;
 
+type TouchLike = { pageX?: number; pageY?: number };
+
+/** Position of a touch. On touchend some platforms (e.g. web) only fill in changedTouches. */
+function point(ne: GestureResponderEvent['nativeEvent']): { x: number; y: number } | null {
+  const candidates: (TouchLike | undefined)[] = [
+    ne as TouchLike,
+    (ne.changedTouches as TouchLike[] | undefined)?.[0],
+    (ne.touches as TouchLike[] | undefined)?.[0],
+  ];
+  for (const c of candidates) {
+    if (c && Number.isFinite(c.pageX) && Number.isFinite(c.pageY)) return { x: c.pageX!, y: c.pageY! };
+  }
+  return null;
+}
+
 function detectDevice(extra: Partial<DeviceInfo>): Partial<DeviceInfo> {
   const { width, height } = Dimensions.get('window');
   const known: RecapPlatform[] = ['ios', 'android', 'web', 'windows', 'macos'];
@@ -81,33 +96,56 @@ export function RecapProvider({ config, children, navigationRef, device }: Recap
       const route = navigationRef.getCurrentRoute();
       if (route?.name) recap.screen(route.name);
     };
-    if (navigationRef.isReady?.() !== false) record();
-    return navigationRef.addListener('state', record);
+    const unsubscribe = navigationRef.addListener('state', record);
+    // The container mounts after this provider, so wait for it to be ready to catch the first screen.
+    let tries = 0;
+    const poll = setInterval(() => {
+      if (navigationRef.isReady?.() !== false || ++tries > 100) {
+        clearInterval(poll);
+        record();
+      }
+    }, 50);
+    return () => {
+      clearInterval(poll);
+      unsubscribe();
+    };
   }, [navigationRef]);
 
   // Touch events bubble to this root View without taking the responder, so app gestures are untouched.
   const onTouchStart = useCallback((e: GestureResponderEvent) => {
-    if (e.nativeEvent.touches.length > 1) {
+    const ne = e.nativeEvent;
+    if ((ne.touches?.length ?? 1) > 1) {
       touch.current = null;
       return;
     }
-    touch.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY, at: Date.now() };
+    const p = point(ne);
+    touch.current = p ? { ...p, at: Date.now() } : null;
   }, []);
 
   const onTouchEnd = useCallback((e: GestureResponderEvent) => {
     const start = touch.current;
     touch.current = null;
-    if (!start) return;
-    const { pageX, pageY } = e.nativeEvent;
-    const moved = Math.hypot(pageX - start.x, pageY - start.y);
+    const end = point(e.nativeEvent);
+    if (!start || !end) return;
+    const moved = Math.hypot(end.x - start.x, end.y - start.y);
     if (moved <= TAP_MAX_MOVE && Date.now() - start.at <= TAP_MAX_MS) {
-      recap.tap({ x: pageX, y: pageY });
+      recap.tap(end);
     }
+  }, []);
+
+  const onTouchCancel = useCallback(() => {
+    touch.current = null;
   }, []);
 
   return (
     <RecapContext.Provider value={recap}>
-      <View style={{ flex: 1 }} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} collapsable={false}>
+      <View
+        style={{ flex: 1 }}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchCancel}
+        collapsable={false}
+      >
         {children}
       </View>
     </RecapContext.Provider>

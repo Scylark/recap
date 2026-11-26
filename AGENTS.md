@@ -254,7 +254,9 @@ that) or build your own views.
 ## Working on this repo
 
 - SDK: `cd sdk-react-native && npm install && npm test && npm run typecheck`
-- Dashboard: `cd dashboard && npm install && npm test && npm run build`
+- Dashboard: `cd dashboard && npm install && npm test && npm run build` (`npm run demo` runs it with sample data, no database)
+- End-to-end test and a working example app: `examples/expo-test-shop/` (see its README)
+- What is and isn't tested yet: `docs/testing.md`
 - Database checks against a scratch Postgres:
   `psql -f supabase/tests/supabase-shim.sql -f supabase/migrations/20261126000000_recap.sql -f supabase/tests/security.sql`
 - The web library in `src/` has its own tests: `npm install && npm test` at the root.

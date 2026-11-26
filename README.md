@@ -53,7 +53,8 @@ review real user sessions in a dashboard they host themselves.
 
 There is no Recap server, account or fee. Point your coding agent at [AGENTS.md](./AGENTS.md) and ask it to
 install Recap: the guide walks it through every step, including Apple and Google privacy disclosures
-([docs/mobile-privacy.md](./docs/mobile-privacy.md)).
+([docs/mobile-privacy.md](./docs/mobile-privacy.md)). To look around first, run `npm run demo` in
+`dashboard/`. How it's tested: [docs/testing.md](./docs/testing.md).
 
 ![Recap dashboard](./docs/images/dashboard-session.png)
 

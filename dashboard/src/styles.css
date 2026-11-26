@@ -14,7 +14,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0e1116;
     --panel: #161b22;
     --text: #e6edf3;
@@ -28,6 +28,21 @@
     --error: #f85149;
     color-scheme: dark;
   }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0e1116;
+  --panel: #161b22;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --line: #2a313c;
+  --accent: #22b8d6;
+  --accent-soft: #0f3640;
+  --warn: #f5a524;
+  --warn-soft: #3d2c0b;
+  --ok: #3fb950;
+  --error: #f85149;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -133,3 +148,5 @@ table.clickable tbody tr:hover { background: var(--accent-soft); }
   .side { position: static; }
   table { display: block; overflow-x: auto; }
 }
+
+.demo-banner { background: var(--warn-soft); color: var(--text); padding: 8px 24px; font-size: 13px; text-align: center; }
