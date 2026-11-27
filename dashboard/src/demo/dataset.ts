@@ -9,6 +9,18 @@ export interface Dataset {
   sessions: SessionRow[];
   events: EventRow[];
   members: Member[];
+  screenshots: ScreenshotRow[];
+}
+
+export interface ScreenshotRow {
+  app_id: string;
+  screen: string;
+  platform: string;
+  app_version: string;
+  width: number;
+  height: number;
+  image: string;
+  captured_at: string;
 }
 
 function rng(seed: number) {
@@ -16,14 +28,14 @@ function rng(seed: number) {
   return () => (x = (x * 16807) % 2147483647) / 2147483647;
 }
 
-interface Btn {
+export interface Btn {
   label: string | null;
   nx: number;
   ny: number;
   to?: string;
 }
 
-const SCREENS: Record<string, Btn[]> = {
+export const SCREENS: Record<string, Btn[]> = {
   Home: [
     { label: 'Search', nx: 0.5, ny: 0.12, to: 'Search' },
     { label: 'Featured: Trail Runner', nx: 0.5, ny: 0.42, to: 'Product' },
@@ -56,10 +68,21 @@ function generate(now: number): Pick<Dataset, 'sessions' | 'events'> {
   const sessions: SessionRow[] = [];
   const events: EventRow[] = [];
   let eid = 100_000;
-  for (let i = 0; i < 64; i++) {
-    const id = `d0000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+  // People, each with one or more visits over four weeks, so retention has something to show.
+  const plan: { start: number; anon: string; user: string | null; ios: boolean; version: string }[] = [];
+  for (let u = 0; u < 70; u++) {
     const ios = r() < 0.58;
-    const start = now - Math.floor(r() * 6.5 * 86_400_000) - 120_000;
+    const user = r() < 0.4 ? `usr_${4000 + u}` : null;
+    const anon = `a0000000-0000-4000-8000-${String(u).padStart(12, '0')}`;
+    let start = now - Math.floor(r() * 27 * 86_400_000) - 120_000;
+    do {
+      plan.push({ start, anon, user, ios, version: start > now - 12 * 86_400_000 ? '2.4.0' : '2.3.1' });
+      start += Math.floor((0.3 + r() * 4) * 86_400_000);
+    } while (start < now - 60_000 && r() < 0.62);
+  }
+  for (let i = 0; i < plan.length; i++) {
+    const id = `d0000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+    const { start, anon, user, ios, version } = plan[i]!;
     const evs: EventRow[] = [];
     let t = 0;
     let screen = 'Home';
@@ -114,11 +137,12 @@ function generate(now: number): Pick<Dataset, 'sessions' | 'events'> {
       app_id: 'demo-shop',
       started_at: new Date(start).toISOString(),
       last_seen_at: new Date(start + t).toISOString(),
-      user_id: r() < 0.4 ? `usr_${4000 + i}` : null,
+      user_id: user,
+      anonymous_id: anon,
       platform: ios ? 'ios' : 'android',
       os_version: ios ? (r() < 0.7 ? '18.1' : '17.6') : r() < 0.6 ? '15' : '14',
       device_model: ios ? (r() < 0.5 ? 'iPhone 16' : 'iPhone 14') : r() < 0.5 ? 'Pixel 9' : 'Galaxy S24',
-      app_version: r() < 0.8 ? '2.4.0' : '2.3.1',
+      app_version: version,
       locale: 'en-GB',
       screen_width: ios ? 393 : 412,
       screen_height: ios ? 852 : 915,
@@ -143,9 +167,9 @@ function jitter(b: Btn, r: () => number) {
 export function buildDataset(now = Date.now()): Dataset {
   const g = generate(now);
   const real = e2e as unknown as { sessions: (SessionRow & { created_at?: string })[]; events: EventRow[] };
-  // Shift the recorded test run so it always sits inside the default "last 7 days" window.
+  // Shift the recorded test run so it sits inside the default "last 7 days" window, behind the fuller sample app.
   const lastReal = Math.max(...real.sessions.map((s) => Date.parse(s.last_seen_at)));
-  const shift = now - 3_600_000 - lastReal;
+  const shift = now - 2 * 86_400_000 - lastReal;
   const move = (iso: string) => new Date(Date.parse(iso) + shift).toISOString();
   return {
     sessions: [
@@ -157,5 +181,42 @@ export function buildDataset(now = Date.now()): Dataset {
       { email: 'demo@example.com', role: 'admin', created_at: new Date(now - 5 * 86_400_000).toISOString() },
       { email: 'design@example.com', role: 'viewer', created_at: new Date(now - 86_400_000).toISOString() },
     ],
+    screenshots: Object.keys(SCREENS).map((screen) => ({
+      app_id: 'demo-shop',
+      screen,
+      platform: 'ios',
+      app_version: '1.3.0',
+      width: 393,
+      height: 852,
+      image: wireframe(screen),
+      captured_at: new Date(now - 2 * 86_400_000).toISOString(),
+    })),
   };
+}
+
+/** A simple drawn stand-in for a real screen picture, built from the demo screen's buttons. */
+function wireframe(screen: string): string {
+  const W = 393;
+  const H = 852;
+  const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const parts = [
+    `<rect width="${W}" height="${H}" fill="#f6f7f9"/>`,
+    `<rect width="${W}" height="96" fill="#ffffff"/>`,
+    `<text x="24" y="72" font-family="system-ui,sans-serif" font-size="26" font-weight="700" fill="#1d2330">${esc(screen)}</text>`,
+  ];
+  for (const b of SCREENS[screen] ?? []) {
+    const cx = b.nx * W;
+    const cy = b.ny * H;
+    const bw = b.label ? Math.min(W - 48, 60 + b.label.length * 11) : 150;
+    const bh = b.label ? 52 : 110;
+    const primary = !!b.to;
+    parts.push(
+      `<rect x="${cx - bw / 2}" y="${cy - bh / 2}" width="${bw}" height="${bh}" rx="12" fill="${primary ? '#2f6fde' : '#ffffff'}" stroke="#d5d9e0"/>`,
+    );
+    parts.push(
+      `<text x="${cx}" y="${cy + 6}" text-anchor="middle" font-family="system-ui,sans-serif" font-size="17" fill="${primary ? '#ffffff' : '#4a5263'}">${esc(b.label ?? 'Banner')}</text>`,
+    );
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${parts.join('')}</svg>`;
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
 }

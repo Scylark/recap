@@ -1,5 +1,5 @@
 import { Heatmap } from '../components/Heatmap';
-import { screenStats, tapsOnScreen, topLabels } from '../lib/data';
+import { screenshotFor, screenStats, tapsOnScreen, topLabels } from '../lib/data';
 import { go, useAsync } from '../lib/util';
 import { Empty } from './Overview';
 
@@ -9,6 +9,10 @@ export function Heatmaps({ appId, since, screen }: { appId: string; since: strin
   const taps = useAsync(
     () => (current ? tapsOnScreen(appId, current, since) : Promise.resolve([])),
     [appId, since, current],
+  );
+  const shot = useAsync(
+    () => (current ? screenshotFor(appId, current) : Promise.resolve(null)),
+    [appId, current],
   );
   const labels = useAsync(
     () => (current ? topLabels(appId, current, since) : Promise.resolve([])),
@@ -32,11 +36,22 @@ export function Heatmaps({ appId, since, screen }: { appId: string; since: strin
       {taps.error && <p className="error">{taps.error}</p>}
       <div className="pair">
         <div>
-          <Heatmap points={taps.data ?? []} width={300} />
+          <Heatmap
+            points={taps.data ?? []}
+            width={300}
+            backgroundUrl={shot.data?.image ?? null}
+            {...(shot.data?.width && shot.data.height ? { aspect: shot.data.height / shot.data.width } : {})}
+          />
           <p className="muted small">
             {taps.data ? `${taps.data.length.toLocaleString()} taps` : 'Loading…'} across all sessions in this period.
             Positions are relative to the screen, so they line up across phone sizes.
           </p>
+          {!shot.loading && !shot.data && (
+            <p className="muted small">
+              Want the screen behind the taps? Turn on <code>screenshots</code> in the SDK config and open this screen
+              once on a test phone.
+            </p>
+          )}
         </div>
         <div className="pair-side">
           <h3>Most tapped</h3>

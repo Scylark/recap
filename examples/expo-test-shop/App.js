@@ -1,8 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Pressable, ScrollView, Text, View, StyleSheet } from 'react-native';
+import { Platform, Pressable, ScrollView, Text, View, StyleSheet } from 'react-native';
 import { RecapProvider, recap, recapPress, useRecapScroll } from '@recap-ux/react-native';
+import { captureRef } from 'react-native-view-shot';
 
 const navigationRef = createNavigationContainerRef();
 const Stack = createNativeStackNavigator();
@@ -49,12 +50,18 @@ function Basket() {
   );
 }
 
+// Screen pictures come from react-native-view-shot on a real phone. In the browser build (used only by
+// the automated end-to-end test) view-shot can't capture, so we send a tiny placeholder picture instead.
+const TEST_PICTURE = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+const capture = Platform.OS === 'web' ? async () => `data:image/png;base64,${TEST_PICTURE}` : captureRef;
+
 export default function App() {
   return (
     <RecapProvider
       navigationRef={navigationRef}
+      captureRef={capture}
       device={{ model: 'Playwright phone' }}
-      config={{ appId: 'test-shop', supabase: { url: cfg.url, anonKey: cfg.anonKey }, storage: AsyncStorage, appVersion: '1.0.0', flushIntervalMs: 2000, debug: true }}
+      config={{ appId: 'test-shop', supabase: { url: cfg.url, anonKey: cfg.anonKey }, storage: AsyncStorage, appVersion: '1.0.0', flushIntervalMs: 2000, debug: true, screenshots: true }}
     >
       <NavigationContainer ref={navigationRef}>
         <Stack.Navigator>

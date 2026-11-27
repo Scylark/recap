@@ -32,7 +32,18 @@ export interface RecapProviderProps {
   navigationRef?: NavigationRefLike;
   /** Extra device details, e.g. model and OS from expo-device. */
   device?: Partial<DeviceInfo>;
+  /**
+   * For screen pictures behind heatmaps: pass `captureRef` from react-native-view-shot and set
+   * `screenshots` in the config. `import { captureRef } from 'react-native-view-shot'`
+   */
+  captureRef?: CaptureRefLike;
 }
+
+/** The shape of react-native-view-shot's captureRef, so we don't depend on the library. */
+export type CaptureRefLike = (
+  view: unknown,
+  options: { format: 'jpg'; quality: number; width: number; result: 'base64' },
+) => Promise<string>;
 
 const TAP_MAX_MOVE = 12; // points
 const TAP_MAX_MS = 600;
@@ -76,8 +87,17 @@ function detectDevice(extra: Partial<DeviceInfo>): Partial<DeviceInfo> {
  * Wrap your app once, near the root. Records taps anywhere in the app, app foreground and
  * background, and screens if you pass a navigationRef.
  */
-export function RecapProvider({ config, children, navigationRef, device }: RecapProviderProps) {
+export function RecapProvider({ config, children, navigationRef, device, captureRef }: RecapProviderProps) {
   const touch = useRef<{ x: number; y: number; at: number } | null>(null);
+  const root = useRef<View>(null);
+
+  useEffect(() => {
+    if (!captureRef || !config.screenshots) return;
+    recap.setScreenCapture(async () =>
+      root.current ? captureRef(root.current, { format: 'jpg', quality: 0.6, width: 360, result: 'base64' }) : null,
+    );
+    return () => recap.setScreenCapture(null);
+  }, [captureRef, config.screenshots]);
 
   useEffect(() => {
     void recap.init(config, detectDevice(device ?? {}));
@@ -140,6 +160,7 @@ export function RecapProvider({ config, children, navigationRef, device }: Recap
   return (
     <RecapContext.Provider value={recap}>
       <View
+        ref={root}
         style={{ flex: 1 }}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}

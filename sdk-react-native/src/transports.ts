@@ -1,4 +1,4 @@
-import type { IngestBatch, Transport } from './types';
+import type { IngestBatch, ScreenshotPayload, Transport } from './types';
 
 type FetchLike = (
   url: string,
@@ -21,21 +21,24 @@ async function postJSON(url: string, headers: Record<string, string>, body: unkn
  */
 export function supabaseTransport(opts: { url: string; anonKey: string }): Transport {
   const base = opts.url.replace(/\/+$/, '');
+  // Legacy anon keys are JWTs and go in both headers. Newer publishable keys (sb_publishable_...)
+  // go in the apikey header only.
+  const headers: Record<string, string> = opts.anonKey.startsWith('eyJ')
+    ? { apikey: opts.anonKey, Authorization: `Bearer ${opts.anonKey}` }
+    : { apikey: opts.anonKey };
   return {
-    send: (batch: IngestBatch) =>
-      postJSON(
-        `${base}/rest/v1/rpc/recap_ingest`,
-        // Legacy anon keys are JWTs and go in both headers. Newer publishable keys (sb_publishable_...)
-        // go in the apikey header only.
-        opts.anonKey.startsWith('eyJ')
-          ? { apikey: opts.anonKey, Authorization: `Bearer ${opts.anonKey}` }
-          : { apikey: opts.anonKey },
-        { payload: batch },
-      ),
+    send: (batch: IngestBatch) => postJSON(`${base}/rest/v1/rpc/recap_ingest`, headers, { payload: batch }),
+    sendScreenshot: (shot: ScreenshotPayload) =>
+      postJSON(`${base}/rest/v1/rpc/recap_screenshot`, headers, { payload: shot }),
   };
 }
 
-/** POSTs each batch as JSON to an endpoint you run. */
-export function endpointTransport(opts: { url: string; headers?: Record<string, string> }): Transport {
-  return { send: (batch: IngestBatch) => postJSON(opts.url, opts.headers ?? {}, batch) };
+/** POSTs each batch as JSON to an endpoint you run. Screenshots go to `screenshotUrl` if you set one. */
+export function endpointTransport(opts: { url: string; headers?: Record<string, string>; screenshotUrl?: string }): Transport {
+  return {
+    send: (batch: IngestBatch) => postJSON(opts.url, opts.headers ?? {}, batch),
+    ...(opts.screenshotUrl
+      ? { sendScreenshot: (shot: ScreenshotPayload) => postJSON(opts.screenshotUrl!, opts.headers ?? {}, shot) }
+      : {}),
+  };
 }

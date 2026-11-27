@@ -13,11 +13,11 @@ export async function myRole(): Promise<'admin' | 'viewer' | null> {
 }
 
 export async function listApps(): Promise<string[]> {
-  // Small projects: read app ids from the latest sessions.
+  // Small projects: read app ids from the latest sessions, most recently active first.
   const rows = check(
     await db().from('recap_sessions').select('app_id').order('started_at', { ascending: false }).limit(1000),
   ) as { app_id: string }[];
-  return [...new Set(rows.map((r) => r.app_id))].sort();
+  return [...new Set(rows.map((r) => r.app_id))];
 }
 
 export interface SessionFilter {
@@ -128,6 +128,26 @@ export async function tapsOnScreen(appId: string, screen: string, since: string)
       .limit(5000),
   ) as { data: Record<string, unknown> }[];
   return rows.map((r) => ({ nx: Number(r.data.nx ?? 0), ny: Number(r.data.ny ?? 0) }));
+}
+
+export interface Screenshot {
+  image: string;
+  width: number | null;
+  height: number | null;
+}
+
+/** The newest picture of a screen, if the app sends them (`screenshots` in the SDK config). */
+export async function screenshotFor(appId: string, screen: string): Promise<Screenshot | null> {
+  const res = await db()
+    .from('recap_screenshots')
+    .select('image,width,height')
+    .eq('app_id', appId)
+    .eq('screen', screen)
+    .order('captured_at', { ascending: false })
+    .limit(1);
+  // Older databases without the screenshots migration just show the plain grid.
+  if (res.error) return null;
+  return ((res.data ?? [])[0] as Screenshot | undefined) ?? null;
 }
 
 export interface LabelCount {

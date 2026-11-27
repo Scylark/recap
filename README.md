@@ -45,11 +45,13 @@ Recap now works in production React Native and Expo apps too. Developers add the
 review real user sessions in a dashboard they host themselves.
 
 - **SDK** in [`sdk-react-native/`](./sdk-react-native): taps, screens, scroll depth, custom events, offline
-  queue, consent and sampling. Never records typed text or screenshots.
-- **Your own database**: one SQL file in [`supabase/`](./supabase) sets up tables and locked-down access in
+  queue, consent and sampling. Never records typed text. Can optionally take one picture of each screen
+  from your test phone, so heatmaps show what was tapped.
+- **Your own database**: a few SQL files in [`supabase/`](./supabase) set up tables and locked-down access in
   a free Supabase project.
-- **Dashboard** in [`dashboard/`](./dashboard): journeys, tap heatmaps, screen exit rates and one-click AI
-  session summaries, deployed to your own Vercel or Netlify.
+- **Dashboard** in [`dashboard/`](./dashboard): journeys, tap heatmaps over real screens, screen exit rates,
+  one-click AI session summaries and Mixpanel-style analytics (trends, funnels, retention, breakdowns,
+  custom events), deployed to your own Vercel or Netlify.
 
 There is no Recap server, account or fee. Point your coding agent at [AGENTS.md](./AGENTS.md) and ask it to
 install Recap: the guide walks it through every step, including Apple and Google privacy disclosures

@@ -1,6 +1,6 @@
 // Stand-in for Supabase's data API, for the end-to-end test only.
 // Like Supabase, it checks the anon key, switches to the `anon` Postgres role, and calls the real
-// recap_ingest() SQL function, so the database's own permission rules are what's being exercised.
+// recap_ingest() and recap_screenshot() SQL functions, so the database's own permission rules are what's being exercised.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -15,7 +15,9 @@ const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers
 http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
   if (req.url === '/__log') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify(log)); }
-  if (req.url.startsWith('/rest/v1/rpc/recap_ingest') && req.method === 'POST') {
+  const rpc = req.method === 'POST' && /^\/rest\/v1\/rpc\/(recap_ingest|recap_screenshot)\b/.exec(req.url);
+  if (rpc) {
+    const fn = rpc[1];
     let body = '';
     for await (const c of req) body += c;
     if (req.headers.apikey !== ANON) { log.push({ status: 401 }); res.writeHead(401, cors); return res.end('{"message":"bad key"}'); }
@@ -24,9 +26,11 @@ http.createServer(async (req, res) => {
       await client.query('begin');
       await client.query('set local role anon');
       const { payload } = JSON.parse(body);
-      const r = await client.query('select public.recap_ingest($1::jsonb) as n', [JSON.stringify(payload)]);
+      const r = await client.query(`select public.${fn}($1::jsonb) as n`, [JSON.stringify(payload)]);
       await client.query('commit');
-      log.push({ status: 200, events: r.rows[0].n, session: payload.session.id });
+      log.push(fn === 'recap_ingest'
+        ? { status: 200, events: r.rows[0].n, session: payload.session.id }
+        : { status: 200, screenshot: payload.screen, bytes: payload.image.length });
       res.writeHead(200, { ...cors, 'content-type': 'application/json' }); res.end(String(r.rows[0].n));
     } catch (e) {
       await client.query('rollback').catch(() => {});

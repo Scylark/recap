@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Heatmap } from '../components/Heatmap';
-import { deleteSession, getEvents, getSession } from '../lib/data';
+import { deleteSession, getEvents, getSession, screenshotFor } from '../lib/data';
 import { summaryForAI } from '../lib/summary';
 import type { EventRow, SessionRow } from '../lib/types';
 import { formatDateTime, formatDuration, go, sessionSeconds, useAsync } from '../lib/util';
@@ -82,6 +82,10 @@ function Detail({
   const [selected, setSelected] = useState<number>(0);
   const visit = v[selected];
   const aspect = session.screen_width && session.screen_height ? session.screen_height / session.screen_width : undefined;
+  const shot = useAsync(
+    () => (visit ? screenshotFor(session.app_id, visit.screen) : Promise.resolve(null)),
+    [session.app_id, visit?.screen],
+  );
   const points = (visit?.events ?? [])
     .filter((e) => e.type === 'tap')
     .map((e) => ({ nx: Number(e.data.nx ?? 0), ny: Number(e.data.ny ?? 0) }));
@@ -157,7 +161,7 @@ function Detail({
         <div className="side">
           <h3>{visit?.screen ?? 'Screen'}</h3>
           <p className="muted small">Taps during this visit</p>
-          <Heatmap points={points} {...(aspect ? { aspect } : {})} />
+          <Heatmap points={points} backgroundUrl={shot.data?.image ?? null} {...(aspect ? { aspect } : {})} />
           {visit && (
             <p>
               <a href={`#/heatmaps/${encodeURIComponent(visit.screen)}`}>All taps on this screen →</a>

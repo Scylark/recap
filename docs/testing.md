@@ -2,13 +2,16 @@
 
 | What | How | Where |
 | --- | --- | --- |
-| SDK logic: sessions, consent, sampling, offline queue, batching, tap labels, start-up buffering, Supabase key headers | 14 unit tests | `sdk-react-native/tests/` |
+| SDK logic: sessions, consent, sampling, offline queue, batching, tap labels, start-up buffering, Supabase key headers, install id, screen pictures (once per screen and version, exclusions, skipped if the person moved on) | 17 unit tests | `sdk-react-native/tests/` |
 | Database: ingest, counters, app isolation, anon can't read, only team members can read, viewers can't delete, admin tools, retention | SQL checks on a real Postgres | `supabase/tests/security.sql` |
+| Analytics and screen pictures: event names, funnel, retention, properties, pictures replace older ones, non-images refused, anon and strangers see nothing | SQL checks on a real Postgres | `supabase/tests/analytics-and-screens.sql` |
+| Analytics numbers: the database functions and the demo's copies give identical results for trends, breakdowns, funnels and retention on 151 sample sessions | 13 checks against a real Postgres | `dashboard/tests/analytics-parity.test.ts` |
 | AI summary built from mobile events | 3 unit tests | `dashboard/tests/` |
-| **End to end**: SDK inside a real Expo app → HTTP → database | Playwright taps through the app as two users on a phone-sized screen, one starting offline | `examples/expo-test-shop/` |
+| **End to end**: SDK inside a real Expo app → HTTP → database | Playwright taps through the app as two users on a phone-sized screen, one starting offline; screen pictures are sent and stored too | `examples/expo-test-shop/` |
+| **On a phone**: the test shop on a real Android phone in Expo Go, sending to a hosted Supabase project | By hand, 26 Nov 2026: 27 events with correct button names, visible in the dashboard | `docs/try-it-on-your-phone.md` |
 | Dashboard screens | Rendered against the recorded test sessions and sample data (`npm run demo` in `dashboard/`) | `dashboard/src/demo/` |
 
-CI (`.github/workflows/mobile.yml`) runs the first three on every change.
+CI (`.github/workflows/mobile.yml`) runs the first five on every change.
 
 ## Result of the end-to-end run (26 Nov 2026)
 
@@ -26,11 +29,9 @@ and the same run passed again. Its iOS and Android bundles also compile with Her
 
 ## Not yet covered
 
-- The SDK has run in Expo's web build, not yet on a physical iPhone or Android device or a simulator.
-  It is plain JavaScript with no native code, so behaviour should match, but touch details can differ by
-  platform and a device run is the next step.
-- The database was a local Postgres 16 with Supabase's roles and `auth.jwt()` recreated, plus a small
-  stand-in for Supabase's API. It has not yet been run against a hosted Supabase project, and the
-  dashboard's real sign-in (Supabase Auth email links) has not been exercised.
+- The SDK has run on an Android phone, not yet on an iPhone.
+- Screen pictures on a real phone use react-native-view-shot, which isn't available in the browser build,
+  so the automated end-to-end test sends a placeholder picture to check the upload and storage path.
+  The first real pictures will come from the next phone run.
 - No load testing yet. Batches are capped at 500 events and 500 KB, and the dashboard reads at most
   5,000 taps per heatmap, which suits small and medium apps.

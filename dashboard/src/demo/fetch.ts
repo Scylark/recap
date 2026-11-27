@@ -2,6 +2,7 @@
 // in-memory data, so the real dashboard code (including supabase-js) runs unchanged with no backend.
 
 import type { EventRow, SessionRow } from '../lib/types';
+import * as local from './analytics';
 import { buildDataset } from './dataset';
 
 const data = buildDataset();
@@ -135,6 +136,16 @@ export const demoFetch: typeof fetch = async (input, init) => {
     const body = (await req.json().catch(() => ({}))) as Record<string, string>;
     if (path === 'rpc/recap_role') return json('admin');
     if (path === 'rpc/recap_screen_stats') return json(screenStats(body.p_app!, body.p_since!));
+    const name = path.slice(4);
+    const until = (body.p_until as string | undefined) ?? new Date().toISOString();
+    const all = () => local.analyticsEvents(data.sessions, data.events);
+    const args = { ...body, p_until: until } as never;
+    if (name === 'recap_event_names') return json(local.eventNames(all(), body.p_app!, body.p_since!, until));
+    if (name === 'recap_event_properties') return json(local.eventProperties(all(), body.p_app!, body.p_since!, until, body.p_event!));
+    if (name === 'recap_trend') return json(local.trend(all(), args));
+    if (name === 'recap_breakdown') return json(local.breakdown(all(), args));
+    if (name === 'recap_funnel') return json(local.funnel(all(), args));
+    if (name === 'recap_retention') return json(local.retention(all(), args));
     if (path === 'rpc/recap_forget_user') {
       const before = data.sessions.length;
       data.sessions = data.sessions.filter((s) => s.user_id !== body.p_user_id);
@@ -150,7 +161,9 @@ export const demoFetch: typeof fetch = async (input, init) => {
         ? (data.events.map((e) => ({ ...e, app_id: data.sessions.find((s) => s.id === e.session_id)?.app_id })) as Row[])
         : path === 'recap_members'
           ? (data.members as unknown as Row[])
-          : undefined;
+          : path === 'recap_screenshots'
+            ? (data.screenshots as unknown as Row[])
+            : undefined;
   if (!table) return json({ message: 'not found' }, {}, 404);
 
   if (method === 'GET' || method === 'HEAD') {

@@ -17,8 +17,9 @@ Supabase project and is viewed in a dashboard **you** deploy. No Recap account, 
 - Screen views from React Navigation, Expo Router (`useRecapScreen(usePathname())`) or manual calls
 - Scroll depth, foreground and background, custom events
 - Offline queue, batching, sampling, consent and opt-out
-- Never records typed text or screenshots
-- Pure TypeScript, no native modules, iOS and Android
+- Never records typed text
+- Optional screen pictures for heatmaps (one per screen per app version, via `react-native-view-shot`; we suggest `screenshots: __DEV__`)
+- Pure TypeScript, no native modules of its own, iOS and Android
 
 **Full setup, written for your coding agent:** [AGENTS.md](../AGENTS.md). Give your agent the repo link and ask
 it to "install Recap following AGENTS.md".

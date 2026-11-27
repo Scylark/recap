@@ -18,6 +18,7 @@ create table if not exists public.recap_sessions (
   started_at    timestamptz not null,
   last_seen_at  timestamptz not null,
   user_id       text,
+  anonymous_id  text,
   platform      text,
   os_version    text,
   device_model  text,
@@ -35,6 +36,7 @@ create table if not exists public.recap_sessions (
 );
 
 create index if not exists recap_sessions_app_started_idx on public.recap_sessions (app_id, started_at desc);
+alter table public.recap_sessions add column if not exists anonymous_id text;  -- for databases set up before it existed
 create index if not exists recap_sessions_user_idx on public.recap_sessions (user_id) where user_id is not null;
 
 create table if not exists public.recap_events (
@@ -168,7 +170,7 @@ begin
   where e ->> 'screen' is not null order by i desc limit 1;
 
   insert into public.recap_sessions as rs (
-    id, app_id, started_at, last_seen_at, user_id, platform, os_version, device_model,
+    id, app_id, started_at, last_seen_at, user_id, anonymous_id, platform, os_version, device_model,
     app_version, locale, screen_width, screen_height, sdk_version,
     event_count, tap_count, screen_count, first_screen, last_screen
   ) values (
@@ -177,6 +179,7 @@ begin
     coalesce((s ->> 'startedAt')::timestamptz, now()),
     coalesce(v_last_at, now()),
     left(s ->> 'userId', 200),
+    left(s ->> 'anonymousId', 100),
     left(d ->> 'platform', 20),
     left(d ->> 'osVersion', 50),
     left(d ->> 'model', 100),
@@ -190,6 +193,7 @@ begin
   on conflict (id) do update set
     last_seen_at = greatest(rs.last_seen_at, excluded.last_seen_at),
     user_id      = coalesce(excluded.user_id, rs.user_id),
+    anonymous_id = coalesce(rs.anonymous_id, excluded.anonymous_id),
     event_count  = rs.event_count + excluded.event_count,
     tap_count    = rs.tap_count + excluded.tap_count,
     screen_count = rs.screen_count + excluded.screen_count,

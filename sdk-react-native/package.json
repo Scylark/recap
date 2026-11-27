@@ -1,6 +1,6 @@
 {
   "name": "@recap-ux/react-native",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Recap for React Native and Expo apps. Self-hosted, privacy-first session analytics: taps, screens, scroll depth and AI-ready session summaries, stored in your own database.",
   "license": "MIT",
   "main": "src/index.ts",

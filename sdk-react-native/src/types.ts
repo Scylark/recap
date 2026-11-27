@@ -30,6 +30,8 @@ export interface SessionInfo {
   id: string;
   startedAt: string;
   userId: string | null;
+  /** Random id stored on this install (with storage configured), so returning users can be counted. */
+  anonymousId?: string | null;
   device: DeviceInfo;
 }
 
@@ -40,9 +42,29 @@ export interface IngestBatch {
   events: RecapEvent[];
 }
 
+/** One picture of a screen, drawn behind its heatmap in the dashboard. */
+export interface ScreenshotPayload {
+  appId: string;
+  screen: string;
+  platform: RecapPlatform;
+  appVersion: string | null;
+  width: number;
+  height: number;
+  /** data:image/jpeg;base64,... */
+  image: string;
+}
+
+/**
+ * Takes a picture of the app's root view. RecapProvider builds one from react-native-view-shot's
+ * captureRef when you pass it. Returns base64 JPEG data (no data: prefix).
+ */
+export type ScreenCapture = () => Promise<string | null>;
+
 /** Where batches go. Supabase and plain HTTP transports are built in; write your own for anything else. */
 export interface Transport {
   send(batch: IngestBatch): Promise<void>;
+  /** Optional: store a screen picture. Without it, screenshots are skipped. */
+  sendScreenshot?(shot: ScreenshotPayload): Promise<void>;
 }
 
 /** Async key/value storage. Pass @react-native-async-storage/async-storage, MMKV or similar. */
@@ -78,6 +100,15 @@ export interface RecapConfig {
   maxQueueSize?: number;
   /** A session ends after this long in the background. Default 30 minutes. */
   sessionTimeoutMs?: number;
+
+  /**
+   * Take one picture of each screen (once per app version, per install) to show behind heatmaps.
+   * Needs react-native-view-shot passed to RecapProvider as `captureRef`.
+   * Pictures show whatever is on screen, so the safe setting is `__DEV__`: you capture clean
+   * pictures from your own test phone and real users are never photographed.
+   * Default false.
+   */
+  screenshots?: boolean | { exclude?: string[]; delayMs?: number };
 
   /** Your app's version string, shown in the dashboard. */
   appVersion?: string;

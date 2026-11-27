@@ -8,16 +8,19 @@ import type {
   RecapConfig,
   RecapEvent,
   RecapEventType,
+  ScreenCapture,
   SessionInfo,
   StorageAdapter,
   TapInput,
   Transport,
 } from './types';
 
-export const SDK_VERSION = '0.1.0';
+export const SDK_VERSION = '0.2.0';
 
 const KEY_QUEUE = 'recap:queue';
 const KEY_CONSENT = 'recap:consent';
+const KEY_INSTALL = 'recap:install';
+const KEY_SHOTS = 'recap:shots';
 
 /** A label arriving this close to a tap (either side) is attached to that tap. */
 const LABEL_WINDOW_MS = 600;
@@ -34,6 +37,7 @@ export interface CoreDeps {
   random?: () => number;
   setInterval?: (fn: () => void, ms: number) => unknown;
   clearInterval?: (handle: unknown) => void;
+  setTimeout?: (fn: () => void, ms: number) => unknown;
 }
 
 const DEFAULT_DEVICE: DeviceInfo = {
@@ -66,6 +70,8 @@ export class RecapCore {
   private sampled = true;
   private consent: ConsentState = 'unknown';
   private userId: string | null = null;
+  /** Random id kept on this install so returning users can be counted. Not tied to any device or ad id. */
+  private anonymousId = '';
 
   private queue: QueuedEvent[] = [];
   /** Events recorded while saved state is still loading. */
@@ -78,11 +84,16 @@ export class RecapCore {
   private currentScreen: string | null = null;
   private scrollMax = new Map<string, number>();
   private pendingLabel: { label: string; at: number } | null = null;
+  private capture: ScreenCapture | null = null;
+  /** Screens already photographed on this install, as "screen|appVersion". */
+  private shots = new Set<string>();
+  private shooting = new Set<string>();
 
   private readonly now: () => number;
   private readonly random: () => number;
   private readonly setIntervalFn: (fn: () => void, ms: number) => unknown;
   private readonly clearIntervalFn: (handle: unknown) => void;
+  private readonly setTimeoutFn: (fn: () => void, ms: number) => unknown;
 
   constructor(deps: CoreDeps = {}) {
     this.now = deps.now ?? (() => Date.now());
@@ -90,6 +101,7 @@ export class RecapCore {
     this.setIntervalFn = deps.setInterval ?? ((fn, ms) => setInterval(fn, ms));
     this.clearIntervalFn =
       deps.clearInterval ?? ((h) => clearInterval(h as ReturnType<typeof setInterval>));
+    this.setTimeoutFn = deps.setTimeout ?? ((fn, ms) => setTimeout(fn, ms));
   }
 
   // ---------------------------------------------------------------- setup
@@ -112,6 +124,8 @@ export class RecapCore {
           : null);
     if (!this.transport) this.log('no transport configured; events stay on the device');
 
+    this.anonymousId = uuid(this.random);
+
     // Start recording straight away; events captured while saved state loads are held back
     // until we know the user's stored consent choice.
     this.startSession();
@@ -121,6 +135,12 @@ export class RecapCore {
       try {
         const saved = await this.storage.getItem(KEY_CONSENT);
         if (saved === 'granted' || saved === 'denied') this.consent = saved;
+        const install = await this.storage.getItem(KEY_INSTALL);
+        if (install) this.anonymousId = install;
+        else await this.storage.setItem(KEY_INSTALL, this.anonymousId);
+        if (this.session) this.session = { ...this.session, anonymousId: this.anonymousId };
+        const shots = await this.storage.getItem(KEY_SHOTS);
+        if (shots) for (const k of JSON.parse(shots) as string[]) this.shots.add(k);
         const raw = await this.storage.getItem(KEY_QUEUE);
         if (raw) {
           const parsed = JSON.parse(raw) as { queue?: QueuedEvent[]; sessions?: SessionInfo[] };
@@ -159,6 +179,7 @@ export class RecapCore {
 
   async optIn(): Promise<void> {
     this.consent = 'granted';
+    await this.storage?.setItem(KEY_INSTALL, this.anonymousId);
     await this.storage?.setItem(KEY_CONSENT, 'granted');
   }
 
@@ -166,6 +187,10 @@ export class RecapCore {
   async optOut(): Promise<void> {
     this.consent = 'denied';
     this.queue = [];
+    // Forget the install id too, so a later opt-in can't be linked to earlier sessions.
+    this.anonymousId = uuid(this.random);
+    if (this.session) this.session = { ...this.session, anonymousId: this.anonymousId };
+    await this.storage?.removeItem(KEY_INSTALL);
     await this.storage?.setItem(KEY_CONSENT, 'denied');
     await this.persist();
   }
@@ -182,6 +207,11 @@ export class RecapCore {
     }
   }
 
+  /** The random install id sent with each session (see `anonymousId` in the docs). */
+  getAnonymousId(): string {
+    return this.anonymousId;
+  }
+
   getSessionId(): string | null {
     return this.session?.id ?? null;
   }
@@ -193,6 +223,49 @@ export class RecapCore {
     const from = this.currentScreen;
     this.currentScreen = name;
     this.record('screen', { from, ...props });
+    this.maybeScreenshot(name);
+  }
+
+  /** Used by RecapProvider to plug in react-native-view-shot. */
+  setScreenCapture(capture: ScreenCapture | null): void {
+    this.capture = capture;
+    if (capture && this.currentScreen) this.maybeScreenshot(this.currentScreen);
+  }
+
+  private maybeScreenshot(name: string): void {
+    const opt = this.config?.screenshots;
+    if (!opt || !this.capture || !this.transport?.sendScreenshot || !this.isRecording()) return;
+    if (typeof opt === 'object' && opt.exclude?.includes(name)) return;
+    const key = `${name}|${this.device.appVersion ?? ''}`;
+    if (this.shots.has(key) || this.shooting.has(key)) return;
+    this.shooting.add(key);
+    const delay = typeof opt === 'object' && opt.delayMs != null ? opt.delayMs : 1200;
+    // Wait for the screen to finish drawing, and skip it if the user has already moved on.
+    this.setTimeoutFn(() => void this.takeScreenshot(name, key), delay);
+  }
+
+  private async takeScreenshot(name: string, key: string): Promise<void> {
+    try {
+      if (this.currentScreen !== name || !this.capture || !this.transport?.sendScreenshot) return;
+      const base64 = await this.capture();
+      if (!base64 || this.currentScreen !== name) return;
+      await this.transport.sendScreenshot({
+        appId: this.config!.appId,
+        screen: name,
+        platform: this.device.platform,
+        appVersion: this.device.appVersion,
+        width: this.device.screenWidth,
+        height: this.device.screenHeight,
+        image: base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`,
+      });
+      this.shots.add(key);
+      this.log(`screenshot of ${name} saved`);
+      await this.storage?.setItem(KEY_SHOTS, JSON.stringify([...this.shots].slice(-500)));
+    } catch (err) {
+      this.log(`screenshot of ${name} failed`, err);
+    } finally {
+      this.shooting.delete(key);
+    }
   }
 
   tap(input: TapInput): void {
@@ -341,6 +414,7 @@ export class RecapCore {
       id: uuid(this.random),
       startedAt: new Date(this.sessionStartMs).toISOString(),
       userId: this.userId,
+      anonymousId: this.anonymousId,
       device: this.device,
     };
     this.sessions.set(this.session.id, this.session);

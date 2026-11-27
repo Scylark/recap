@@ -227,4 +227,68 @@ describe('RecapCore', () => {
     await r.flush();
     expect(r.pending()).toHaveLength(1);
   });
+
+  it('keeps one anonymous install id across launches and forgets it on opt-out', async () => {
+    const storage = memoryStorage();
+    let n = 0;
+    const seq = { ...deps, random: () => ((n = (n * 7 + 3) % 97), n / 97) };
+    const t1 = fakeTransport();
+    const first = new RecapCore(seq);
+    await first.init({ appId: 'test', transport: t1, storage }, device);
+    first.screen('Home');
+    await first.flush();
+    const id = t1.batches[0]!.session.anonymousId;
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(storage.data.get('recap:install')).toBe(id);
+
+    const t2 = fakeTransport();
+    const second = new RecapCore(seq);
+    await second.init({ appId: 'test', transport: t2, storage }, device);
+    second.screen('Home');
+    await second.flush();
+    expect(t2.batches[0]!.session.anonymousId).toBe(id);
+    expect(t2.batches[0]!.session.id).not.toBe(t1.batches[0]!.session.id);
+
+    await second.optOut();
+    expect(storage.data.has('recap:install')).toBe(false);
+    expect(second.getAnonymousId()).not.toBe(id);
+  });
+
+  it('takes one screenshot per screen and app version, after the screen settles', async () => {
+    const storage = memoryStorage();
+    const timers: (() => void)[] = [];
+    const d = { ...deps, setTimeout: (fn: () => void) => void timers.push(fn) };
+    const shots: { screen: string; image: string; appVersion: string | null }[] = [];
+    const transport = { ...fakeTransport(), sendScreenshot: async (s: { screen: string; image: string; appVersion: string | null }) => void shots.push(s) };
+    const r = new RecapCore(d);
+    await r.init({ appId: 'test', transport, storage, screenshots: { exclude: ['Secret'] }, appVersion: '1.2.0' }, device);
+    let calls = 0;
+    r.setScreenCapture(async () => (calls++, 'QUJD'));
+
+    r.screen('Home');
+    r.screen('Secret'); // excluded
+    r.screen('Product'); // Home timer will find the user has moved on
+    for (const t of timers.splice(0)) t();
+    await new Promise((res) => setTimeout(res, 0));
+    expect(shots.map((s) => s.screen)).toEqual(['Product']);
+    expect(shots[0]).toMatchObject({ image: 'data:image/jpeg;base64,QUJD', appVersion: '1.2.0' });
+
+    r.screen('Home');
+    for (const t of timers.splice(0)) t();
+    await new Promise((res) => setTimeout(res, 0));
+    r.screen('Product'); // already captured for this version
+    expect(timers).toHaveLength(0);
+    expect(shots.map((s) => s.screen)).toEqual(['Product', 'Home']);
+    expect(JSON.parse(storage.data.get('recap:shots')!)).toEqual(['Product|1.2.0', 'Home|1.2.0']);
+    expect(calls).toBe(2);
+  });
+
+  it('takes no screenshots unless switched on', async () => {
+    const timers: (() => void)[] = [];
+    const r = new RecapCore({ ...deps, setTimeout: (fn: () => void) => void timers.push(fn) });
+    await r.init({ appId: 'test', transport: { ...fakeTransport(), sendScreenshot: async () => undefined } }, device);
+    r.setScreenCapture(async () => 'QUJD');
+    r.screen('Home');
+    expect(timers).toHaveLength(0);
+  });
 });

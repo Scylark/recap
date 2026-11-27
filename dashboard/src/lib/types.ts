@@ -4,6 +4,8 @@ export interface SessionRow {
   started_at: string;
   last_seen_at: string;
   user_id: string | null;
+  /** Random install id from the SDK; null for sessions from SDK versions before 0.2. */
+  anonymous_id?: string | null;
   platform: string | null;
   os_version: string | null;
   device_model: string | null;

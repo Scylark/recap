@@ -8,7 +8,8 @@ questions marked **Ask**, and do not skip the privacy steps.
 
 Recap is free, open-source (MIT) session analytics for mobile apps. It records which screens people visit,
 where they tap, how far they scroll and when they leave, then shows it in a dashboard with journeys, tap
-heatmaps and a one-click AI summary of any session.
+heatmaps drawn over real screen pictures, a one-click AI summary of any session, and product analytics
+(trends, funnels, retention, breakdowns and custom events, in the style of Mixpanel).
 
 There is **no Recap company server, account, API key or payment**. Everything runs in infrastructure the
 app owner controls:
@@ -24,7 +25,7 @@ app owner controls:
 | Part | Where it lives in this repo | What it is |
 | --- | --- | --- |
 | SDK | `sdk-react-native/` | React Native / Expo package `@recap-ux/react-native` |
-| Database | `supabase/migrations/` | One SQL file: tables, security rules, ingest function |
+| Database | `supabase/migrations/` | SQL files: tables, security rules, ingest, analytics functions, screen pictures |
 | Dashboard | `dashboard/` | Static React app the owner deploys and signs in to |
 | Web prototypes | `src/` | The original `recap-ux` script for web prototypes (separate, unchanged) |
 
@@ -46,10 +47,11 @@ The developer must do the sign-up part themselves at https://supabase.com (you c
 Then either:
 
 - **With the Supabase CLI** (preferred when the project is linked):
-  copy `supabase/migrations/20261126000000_recap.sql` from this repo into their `supabase/migrations/` folder
-  and run `supabase db push`.
-- **Without the CLI:** ask the developer to open the Supabase dashboard, SQL Editor, paste the whole file
-  and press Run. It is safe to run more than once.
+  copy every file in this repo's `supabase/migrations/` into their `supabase/migrations/` folder and run
+  `supabase db push`.
+- **Without the CLI:** ask the developer to open the Supabase dashboard, SQL Editor, and paste and run each
+  file in `supabase/migrations/` in name order (sessions and events first, then analytics, then screen
+  pictures). Each is safe to run more than once, so when Recap is updated, just run them all again.
 
 Then add the first dashboard admin. **Ask** for the email they will sign in with, and have them run:
 
@@ -149,6 +151,22 @@ export default function RootLayout() {
 Optional device details (nicer dashboard): if `expo-device` is installed, pass
 `device={{ model: Device.modelName ?? null }}` to `RecapProvider`.
 
+**Screen pictures behind heatmaps (recommended).** Heatmaps are far easier to read with the real screen
+underneath. Install `react-native-view-shot` (`npx expo install react-native-view-shot`; it needs a
+development build or a store build, and Expo Go already includes it), then:
+
+```tsx
+import { captureRef } from 'react-native-view-shot';
+
+<RecapProvider captureRef={captureRef} config={{ ...config, screenshots: __DEV__ }}>
+```
+
+The SDK takes one small JPEG of each screen, once per app version, about a second after the screen opens,
+and only if the person is still on it. **Recommend `screenshots: __DEV__`** so pictures only come from the
+developer's own test phone, never from real users' screens, which may show their personal details. If the
+owner wants pictures from production builds, ask first, and list screens that show personal data in
+`screenshots: { exclude: ['Account', 'Checkout'] }`.
+
 ## Step 4. Make the data readable
 
 These are small edits but they make the dashboard far more useful. Do them for the app's main flows.
@@ -217,7 +235,11 @@ default; for a team, also consider turning off open sign-ups (only listed member
    screens. Logs should show `[Recap] uploaded N events` within about ten seconds.
 2. Sign in to the dashboard with the admin email. The session should appear under Sessions.
 3. Open it and press **Copy AI summary** to check the summary reads sensibly.
-4. Remove `debug: true`.
+4. Open **Analytics**: Trends should show today's sessions, and Events should list the screens and any
+   `recap.track` names.
+5. If screenshots are on, open **Heatmaps**: each screen visited for more than a second should show its
+   picture behind the taps (logs show `[Recap] screenshot of Home saved`).
+6. Remove `debug: true`.
 
 If nothing arrives: check the URL and anon key, that the SQL ran without errors, and that the device has
 network access. Upload errors are logged when `debug` is on.
@@ -237,16 +259,21 @@ network access. Upload errors are logged when `debug` is on.
 | `maxBatchSize` | `50` | Events per request |
 | `maxQueueSize` | `1000` | Offline cap; oldest dropped first |
 | `sessionTimeoutMs` | `1800000` | Background time after which a new session starts |
-| `appVersion` | | Shown in the dashboard |
+| `appVersion` | | Shown in the dashboard; also lets you filter analytics by release |
+| `screenshots` | `false` | `true`, or `{ exclude?: string[], delayMs?: number }`. Needs the `captureRef` prop. Suggest `__DEV__` |
 | `debug` | `false` | Console logging |
 
+Props on `RecapProvider`: `config`, `navigationRef?`, `device?`, `captureRef?` (from react-native-view-shot).
+
 API: `recap.screen(name)`, `recap.track(name, props)`, `recap.setUserId(id | null)`, `recap.optIn()`,
-`recap.optOut()`, `recap.flush()`, `recapPress(label, handler)`, `useRecapScreen(name)`, `useRecapScroll()`.
+`recap.optOut()`, `recap.flush()`, `recap.getAnonymousId()`, `recapPress(label, handler)`, `useRecapScreen(name)`, `useRecapScroll()`.
 
 ### Using your own backend instead of Supabase
 
 Set `endpoint: { url: 'https://api.example.com/recap', headers: { Authorization: 'Bearer ...' } }`. Each
-request body is one JSON batch: `{ appId, sdkVersion, session: { id, startedAt, userId, device }, events: [{ type, t, at, screen, data }] }`.
+request body is one JSON batch: `{ appId, sdkVersion, session: { id, startedAt, userId, anonymousId, device }, events: [{ type, t, at, screen, data }] }`.
+Screen pictures need their own URL: `endpoint: { url, screenshotUrl }` receives
+`{ appId, screen, platform, appVersion, width, height, image }` where `image` is a base64 JPEG data URL.
 Store it however you like. The bundled dashboard reads the Supabase tables, so with a custom backend you
 would either load the batches into Postgres with the same schema (the `recap_ingest` function does exactly
 that) or build your own views.
@@ -258,6 +285,8 @@ that) or build your own views.
 - End-to-end test and a working example app: `examples/expo-test-shop/` (see its README)
 - What is and isn't tested yet: `docs/testing.md`
 - Hands-on trial on a phone (for people, not agents): `docs/try-it-on-your-phone.md`
-- Database checks against a scratch Postgres:
-  `psql -f supabase/tests/supabase-shim.sql -f supabase/migrations/20261126000000_recap.sql -f supabase/tests/security.sql`
+- Database checks against a scratch Postgres: run `supabase/tests/supabase-shim.sql`, then every file in
+  `supabase/migrations/` in order, then `supabase/tests/security.sql` and `supabase/tests/analytics-and-screens.sql`.
+- Analytics parity (database functions vs the demo's copies):
+  `cd dashboard && RECAP_TEST_PG=postgres://... TZ=UTC npx vitest run tests/analytics-parity.test.ts` on a scratch database.
 - The web library in `src/` has its own tests: `npm install && npm test` at the root.

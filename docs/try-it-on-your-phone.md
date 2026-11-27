@@ -10,9 +10,9 @@ You need: a phone, a computer on the same Wi-Fi with [Node.js](https://nodejs.or
 
 1. Sign in at [supabase.com](https://supabase.com) and click **New project**. Any name, any password (you
    won't need it again), and the region closest to you.
-2. When it's ready, open **SQL Editor**, paste the whole of
-   [`supabase/migrations/20261126000000_recap.sql`](../supabase/migrations/20261126000000_recap.sql)
-   and click **Run**. You should see "Success. No rows returned".
+2. When it's ready, open **SQL Editor** and run each file in [`supabase/migrations/`](../supabase/migrations/)
+   in name order: paste the whole file, click **Run**, then do the next. There are three: sessions and
+   events, analytics, and screen pictures. You should see "Success. No rows returned" each time.
 3. Still in the SQL Editor, run this with your own email address. It makes you the dashboard's first admin:
    ```sql
    insert into public.recap_members (email, role) values ('you@example.com', 'admin');

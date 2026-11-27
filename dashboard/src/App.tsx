@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import { listApps, myRole } from './lib/data';
 import { isConfigured, isDemo, supabase } from './lib/supabase';
 import { readPref, sinceDays, useAsync, useRoute, writePref } from './lib/util';
+import { Analytics } from './pages/Analytics';
 import { Heatmaps } from './pages/Heatmaps';
 import { Login, NotConfigured, NotMember } from './pages/Login';
 import { Members } from './pages/Members';
@@ -53,7 +54,7 @@ function SignedIn({ email }: { email: string }) {
   if (!role.data) return <NotMember email={email} onSignOut={signOut} />;
 
   const isAdmin = role.data === 'admin';
-  const [page, arg] = route;
+  const [page, arg, arg2] = route;
   const decoded = arg ? decodeURIComponent(arg) : undefined;
   const rangeLabel = RANGES.find((r) => r.days === days)?.label ?? '';
   const nav = (key: string, label: string) => (
@@ -79,6 +80,8 @@ function SignedIn({ email }: { email: string }) {
     );
   } else if (page === 'session' && decoded) body = <SessionDetail id={decoded} isAdmin={isAdmin} />;
   else if (page === 'sessions') body = <Sessions appId={appId} since={since} {...(decoded ? { screen: decoded } : {})} />;
+  else if (page === 'analytics')
+    body = <Analytics appId={appId} since={since} days={days} {...(arg ? { tab: arg } : {})} {...(arg2 ? { arg: decodeURIComponent(arg2) } : {})} />;
   else if (page === 'heatmaps') body = <Heatmaps appId={appId} since={since} {...(decoded ? { screen: decoded } : {})} />;
   else body = <Overview appId={appId} since={since} rangeLabel={rangeLabel} />;
 
@@ -97,6 +100,7 @@ function SignedIn({ email }: { email: string }) {
         <nav>
           {nav('overview', 'Overview')}
           {nav('sessions', 'Sessions')}
+          {nav('analytics', 'Analytics')}
           {nav('heatmaps', 'Heatmaps')}
           {nav('members', 'Team')}
         </nav>
