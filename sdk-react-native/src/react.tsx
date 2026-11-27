@@ -5,6 +5,7 @@ import {
   AppState,
   Dimensions,
   Keyboard,
+  PixelRatio,
   Platform,
   View,
   type GestureResponderEvent,
@@ -98,10 +99,19 @@ export function RecapProvider({ config, children, navigationRef, device, capture
       if (!root.current) return null;
       // view-shot only shrinks the picture when it gets both a width and a height; with a width alone
       // it captures at full phone resolution, which is several times bigger and slower to take.
+      // On iOS view-shot treats the size as points and renders at the screen's scale (3x on most
+      // iPhones), so divide by the pixel ratio there to get the same pixel size as Android.
       const width = opts?.width ?? 360;
       const win = Dimensions.get('window');
       const height = Math.round(width * (win.width > 0 ? win.height / win.width : 2.16));
-      return captureRef(root.current, { format: 'jpg', quality: opts?.quality ?? 0.6, width, height, result: 'base64' });
+      const scale = Platform.OS === 'ios' ? Math.max(1, PixelRatio.get()) : 1;
+      return captureRef(root.current, {
+        format: 'jpg',
+        quality: opts?.quality ?? 0.6,
+        width: width / scale,
+        height: height / scale,
+        result: 'base64',
+      });
     });
     return () => recap.setScreenCapture(null);
   }, [captureRef, config.screenshots, config.recordings]);
