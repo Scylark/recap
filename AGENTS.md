@@ -49,9 +49,10 @@ Then either:
 - **With the Supabase CLI** (preferred when the project is linked):
   copy every file in this repo's `supabase/migrations/` into their `supabase/migrations/` folder and run
   `supabase db push`.
-- **Without the CLI:** ask the developer to open the Supabase dashboard, SQL Editor, and paste and run each
-  file in `supabase/migrations/` in name order (sessions and events first, then analytics, then screen
-  pictures). Each is safe to run more than once, so when Recap is updated, just run them all again.
+- **Without the CLI:** ask the developer to open the Supabase dashboard, SQL Editor, New query, paste the
+  whole of `supabase/setup.sql` and press Run. It is every migration in order, in one file, and ends with a
+  row saying `Recap is set up`. It is safe to run again, so when Recap is updated, run it again. (Supabase
+  may call the query "destructive": it only recreates Recap's own access rules.)
 
 Then add the first dashboard admin. **Ask** for the email they will sign in with, and have them run:
 
@@ -294,7 +295,7 @@ option table.
    ```html
    <script defer
      src="https://cdn.jsdelivr.net/gh/Scylark/recap@v1.3.0/dist/recap.min.js"
-     integrity="REPLACE_WITH_SRI" crossorigin="anonymous"
+     integrity="sha384-8wgD4Wmlu6eME7JD9xA+I/gWbqutajBp2faL0205zSqQYR1kmkBAIkpubfFtUdh5" crossorigin="anonymous"
      data-app-id="my-site-web"
      data-supabase-url="https://abcd1234.supabase.co"
      data-supabase-key="sb_publishable_…"

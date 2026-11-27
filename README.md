@@ -69,8 +69,13 @@ iOS and Android sit side by side in one set of analytics. It takes about 30 minu
 made for a public site: you don't need any code of your own around it. Leave `supabase` out and Recap
 keeps working the original way, with nothing leaving the browser.
 
-**1. Database.** Run every file in [`supabase/migrations/`](./supabase/migrations) in your Supabase project and
-add yourself as a dashboard admin ([AGENTS.md](./AGENTS.md), Step 1, has the details). Copy the project URL
+**Step by step, with timings and one-click dashboard deploys: [Recap on a live website in 30
+minutes](./docs/quickstart-web.md).** Privacy policy wording and the App Store and Google Play answers are in
+[docs/privacy-and-store-labels.md](./docs/privacy-and-store-labels.md).
+
+**1. Database.** Paste [`supabase/setup.sql`](./supabase/setup.sql) into your Supabase project's SQL editor and
+press Run (it is every migration in one file, safe to run again), then add yourself as a dashboard admin
+([AGENTS.md](./AGENTS.md), Step 1, has the details). Copy the project URL
 and the **anon or publishable** key. Never use the `service_role` or `sb_secret_…` key: Recap refuses it,
 logs an error and sends nothing.
 
@@ -79,7 +84,7 @@ logs an error and sends nothing.
 ```html
 <script defer
   src="https://cdn.jsdelivr.net/gh/Scylark/recap@v1.3.0/dist/recap.min.js"
-  integrity="REPLACE_WITH_SRI" crossorigin="anonymous"
+  integrity="sha384-8wgD4Wmlu6eME7JD9xA+I/gWbqutajBp2faL0205zSqQYR1kmkBAIkpubfFtUdh5" crossorigin="anonymous"
   data-app-id="my-site"
   data-supabase-url="https://your-project.supabase.co"
   data-supabase-key="sb_publishable_…"
