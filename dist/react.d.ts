@@ -11,6 +11,6 @@ export interface RecapProps extends RecapConfig {
  * <Recap showPanel sessionName="participant-01" />
  * ```
  */
-export declare function RecapComponent({ sessionName, showPanel, endpoint, shortcut, stripQueryParams, }: RecapProps): null;
+export declare function RecapComponent({ onExport: _onExport, ...config }: RecapProps): null;
 export { RecapComponent as Recap };
 export default RecapComponent;

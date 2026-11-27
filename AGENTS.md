@@ -278,13 +278,24 @@ network access. Upload errors are logged when `debug` is on.
 ## Websites and web apps
 
 If the developer also has a website or web app, it can report to the same database and dashboard.
-1. Install `recap-ux` (and `rrweb@2.2.2` if they want page replays) and call `Recap.init({ appId, supabase: { url, anonKey }, recordings: { record } })`
-   once at start-up, with a different `appId` from the mobile app (e.g. `my-shop-web`). See the README for the script-tag version.
+1. Install `recap-ux` (and `rrweb@2.2.2` if they want page replays) and call
+   `Recap.init({ appId, supabase: { url, anonKey }, panel: false, recordings: { record } })` once at start-up, with a
+   different `appId` from the mobile app (e.g. `my-shop-web`). Importing the module starts nothing until `init()`.
+   `panel: false` keeps Recap's researcher panel, shortcut and three-finger hold away from visitors. With the script
+   tag, use `data-panel="false"` (see the README).
 2. Run `supabase/migrations/20261127025000_recap_dom.sql` and `20261127040000_recap_dom_limits.sql` if they turn on recordings (the second makes web recordings follow the Storage page limits).
 3. **Ask** which parts of the site show personal details (account pages, order history, messages) and add
-   `class="recap-private"` to them. Form fields are always masked.
-4. Add `Recap.track('event_name', { … })` for the steps that matter (sign-up, add to basket, purchase), as on mobile.
-5. Verify: browse the site with the browser console open (`debug: true` in `Recap.init`), then check the session in the dashboard.
+   `class="recap-private"` to them: taps there aren't counted and they are left out of recordings. Form fields are
+   always masked. Tap labels come only from `aria-label`, `title`, `alt` and similar once sessions go to the
+   dashboard (`labels: 'attributes'`), never on-screen text; use `labels: 'none'` if even those can hold personal
+   details, and `class="ut-mask"` on anything whose text must never be used. If recordings are on and pages show
+   personal text outside the private parts, set `recordings: { record, maskText: true }` (or a selector).
+4. **Consent. Ask** the same question as on mobile (Step 5). If they need opt-in, set `requireConsent: true` and
+   call `Recap.optIn()` from their consent banner. Either way, wire `Recap.optOut()` to a settings switch.
+5. If one screen has several addresses (`/plan` and `/plan.html`, or ids in the path), pass
+   `screenName: (path) => …` in the first `init()` call so they count as one screen.
+6. Add `Recap.track('event_name', { … })` for the steps that matter (sign-up, add to basket, purchase), as on mobile.
+7. Verify: browse the site with the browser console open (`debug: true` in `Recap.init`), then check the session in the dashboard.
 
 ## Configuration reference
 

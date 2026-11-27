@@ -83,10 +83,42 @@ Recap.track('signed_up', { plan: 'pro' }); // custom events for funnels
 Or with a script tag: `<script src="…/recap.min.js" data-app-id="my-site" data-supabase-url="…" data-supabase-key="…"></script>`
 (add `data-recordings="true"` and load rrweb's script first for replays).
 
+Importing `recap-ux` as a module starts nothing until you call `Recap.init()`. The script tag (`recap.min.js`)
+starts itself from its `data-*` attributes.
+
 Page recordings use [rrweb](https://github.com/rrweb-io/rrweb): they capture the page's structure and changes rather than
 pictures, so replays are sharp and smooth, scrolling and open menus included. Every form field is masked, and anything
 marked `class="recap-private"` or `data-ut-no-track` is left out. They need `supabase/migrations/*_recap_dom.sql`.
 Try it with the test shop in [`examples/web-test-shop/`](./examples/web-test-shop).
+
+**On a live site**, these settings keep visitors' details out and Recap's own tools hidden:
+
+```js
+Recap.init({
+  appId: 'my-site',
+  supabase: { url, anonKey },
+  panel: false,                 // no researcher panel, shortcut or three-finger hold for visitors
+  labels: 'attributes',         // tap labels from aria-label, title, alt only, never on-screen text (the default once sending)
+  screenName: (path) => path.replace(/\.html$/, ''), // count /plan and /plan.html as one screen
+  requireConsent: true,         // record nothing until Recap.optIn()
+  recordings: { record, maskText: true }, // replays show the layout with every word replaced by *
+});
+
+// From your cookie banner or settings page:
+Recap.optIn();   // remembered in this browser
+Recap.optOut();  // stops at once and deletes anything not yet sent; remembered too
+```
+
+| Setting | What it does |
+| --- | --- |
+| `panel: false` | Turns off the researcher panel, its keyboard shortcut and the touch-hold. `shortcut: false` turns off only the shortcut. A later `init()` can change it |
+| `labels` | Where tap labels come from: `'text'` also uses the tapped element's visible text, `'attributes'` only `aria-label`, `aria-labelledby`, `title`, `alt` and `placeholder`, `'none'` only your own `data-ut-label`. Default: `'text'` while data stays in the browser, `'attributes'` once sessions go to a dashboard |
+| `screenName(path)` | Returns the name to count a page under. Used for page views, taps, scrolls and dashboard screens. Return nothing to keep the path |
+| `requireConsent` | Nothing is recorded or sent until `Recap.optIn()`. `Recap.optOut()` works either way, and both choices are kept in `localStorage` (`recap-consent`). `Recap.isRecording()` says where things stand |
+| `recordings.maskText` | `true` replaces all text in replays with `*`, or pass a CSS selector for the parts to mask. `.ut-mask` text is always masked |
+
+Set `screenName` in your first `init()` call. With the script tag, add `data-auto-init="false"` and call
+`Recap.init({ screenName })` yourself: the tag's other `data-*` settings still apply.
 
 ## Quick start
 
@@ -126,12 +158,18 @@ All options are `data-*` attributes on the script tag:
 |-----------|---------|-------------|
 | `data-session-name` | auto | Label for this session, e.g. `"participant-04"` |
 | `data-show-panel` | `"false"` | Show researcher panel on load |
-| `data-shortcut` | `"alt+shift+y"` | Keyboard shortcut for the researcher panel. Format: modifiers and one key joined by `+`, e.g. `"ctrl+shift+y"` |
+| `data-panel` | `"true"` | `"false"` turns off the researcher panel, its shortcut and the touch-hold. Use it on live sites |
+| `data-shortcut` | `"alt+shift+y"` | Keyboard shortcut for the researcher panel. Format: modifiers and one key joined by `+`, e.g. `"ctrl+shift+y"`. `"false"` for none |
+| `data-labels` | `"text"`, or `"attributes"` with Supabase | Where tap labels come from: `"text"`, `"attributes"` or `"none"` (see [Element labelling](#element-labelling)) |
+| `data-require-consent` | `"false"` | Record nothing until the page calls `Recap.optIn()` |
+| `data-auto-init` | `"true"` | `"false"` waits for the page to call `Recap.init()`, with the tag's settings underneath |
+| `data-recap` | none | Marks this tag as Recap's, if you renamed the file |
 | `data-supabase-url` | none | Your Supabase project URL. With `data-supabase-key`, sessions also go to the Recap dashboard (see [Web sessions in the dashboard](#web-sessions-in-the-dashboard)) |
 | `data-supabase-key` | none | Your Supabase **public anon or publishable key**. Never the service role key |
 | `data-app-id` | page hostname | Name for this site in the dashboard, e.g. `my-shop-web` |
 | `data-app-version` | none | Your site's version, shown in the dashboard |
 | `data-recordings` | `"false"` | With Supabase set: record pages for replay in the dashboard. Load rrweb's script before Recap's |
+| `data-mask-text` | none | With recordings: `"true"` replaces all text in replays with `*`, or a CSS selector for the parts to mask |
 | `data-endpoint` | none | URL to POST captured events to in batches (see [Advanced](#advanced)) |
 | `data-strip-query-params` | `"true"` | Remove query strings from recorded URLs. Set to `"false"` to keep them |
 | `data-touch-trigger` | `"true"` | Hold 3 fingers on screen to open/close the panel on touch devices |
@@ -150,20 +188,32 @@ To use a different key, set `data-shortcut` on the script tag, for example `data
 
 ## Element labelling
 
-Recap auto-detects labels from `aria-label`, `title`, `alt`, and inner text. For ambiguous elements, add explicit labels:
+A tap is counted on the element it was aimed at: the closest button, link, form control, element with a
+clickable role, or element with `data-ut-label`. A tap on an icon inside a button is a tap on the button.
+
+Recap labels it from, in order: `data-ut-label`, `aria-label`, `aria-labelledby`, `title`, `alt`, the visible text
+(first 50 characters) and `placeholder`. The `labels` setting limits that: `'text'` uses them all,
+`'attributes'` everything except the visible text, and `'none'` only `data-ut-label`. It defaults to `'text'`
+while data stays in the browser and `'attributes'` once sessions go to a dashboard. For ambiguous elements,
+add explicit labels:
 
 ```html
 <button data-ut-label="Submit assessment">Save</button>
 <div data-ut-label="Filter panel">...</div>
 ```
 
-To exclude sensitive elements from tracking:
+To keep sensitive things out:
 
 ```html
 <input type="password" data-ut-no-track />
-<div class="ut-block">Hidden from tracking entirely</div>
-<span class="ut-mask">Text replaced with asterisks</span>
+<section class="recap-private">No taps counted, and left out of recordings</section>
+<div class="ut-block">Same as recap-private</div>
+<span class="ut-mask">Never used in labels, and masked in recordings</span>
 ```
+
+`data-ut-no-track`, `recap-private` and `ut-block` cover everything inside them; on `<body>` they also stop
+scroll depth. Inside `ut-mask`, only `data-ut-label` can label a tap: never `aria-label`, `title`, `alt`,
+`aria-labelledby`, `placeholder` or text.
 
 ## Advanced
 

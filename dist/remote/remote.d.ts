@@ -1,5 +1,7 @@
 import type { AnyEvent } from '../types.js';
-export declare const REMOTE_SDK_VERSION = "web-0.1.0";
+export declare const REMOTE_SDK_VERSION = "web-0.2.0";
+/** The rrweb maskTextSelector for a recordings.maskText setting. `.ut-mask` text is always masked. */
+export declare function maskTextSelectorFor(maskText: boolean | string | undefined): string;
 /** rrweb's `record` function. Pass `import { record } from 'rrweb'`, or load rrweb with a script tag. */
 export type RrwebRecord = ((options: {
     emit: (event: RrwebEvent) => void;
@@ -20,6 +22,12 @@ export interface RemoteRecordingOptions {
     sampleRate?: number;
     /** Extra CSS selector for parts of the page never recorded. `[data-ut-no-track]` and `.recap-private` always are. */
     blockSelector?: string;
+    /**
+     * Text to replace with `*` in recordings, keeping the layout: `true` for all text on the page, or
+     * a CSS selector for the parts to mask (and everything inside them). Text inside `.ut-mask` is
+     * always masked. Form fields are always masked, whatever this says. Default: only `.ut-mask`.
+     */
+    maskText?: boolean | string;
 }
 export interface RemoteConfig {
     /** A short name for this site or app, e.g. "my-shop-web". */
@@ -78,6 +86,12 @@ export declare class RemoteSink {
     /** Start sending. Returns false if this session wasn't sampled. */
     start(): boolean;
     stop(): void;
+    /**
+     * The visitor opted out: stop at once and delete everything not yet sent (events and
+     * recording). The browser's random id is forgotten too, so a later opt-in can't be linked to
+     * earlier visits.
+     */
+    discard(): void;
     getSessionId(): string;
     /** Feed one event from the web tracker's capture layers. */
     handle(event: AnyEvent): void;

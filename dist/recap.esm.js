@@ -63,48 +63,89 @@ function sanitizeUrl(rawUrl, stripQuery = true) {
     return rawUrl.split("?")[0]?.split("#")[0] ?? rawUrl;
   }
 }
+const EXCLUDE_SELECTOR = "[data-ut-no-track], .ut-block, .recap-private";
 function isExcluded(el) {
-  if (el.hasAttribute("data-ut-no-track")) return true;
-  if (el.classList.contains("ut-block")) return true;
-  let parent = el.parentElement;
-  while (parent) {
-    if (parent.hasAttribute("data-ut-no-track")) return true;
-    if (parent.classList.contains("ut-block")) return true;
-    parent = parent.parentElement;
-  }
-  return false;
+  return el.closest(EXCLUDE_SELECTOR) !== null;
 }
 function isMasked(el) {
-  if (el.classList.contains("ut-mask")) return true;
-  let parent = el.parentElement;
-  while (parent) {
-    if (parent.classList.contains("ut-mask")) return true;
-    parent = parent.parentElement;
-  }
-  return false;
+  return el.closest(".ut-mask") !== null;
 }
-function extractLabel(el) {
+let _labelMode = "text";
+function setLabelMode(mode) {
+  _labelMode = mode;
+}
+function getLabelMode() {
+  return _labelMode;
+}
+const INTERACTIVE_SELECTOR = [
+  "[data-ut-label]",
+  "a[href]",
+  "button",
+  "input",
+  "select",
+  "textarea",
+  "label",
+  "summary",
+  "option",
+  '[role="button"]',
+  '[role="link"]',
+  '[role="menuitem"]',
+  '[role="menuitemcheckbox"]',
+  '[role="menuitemradio"]',
+  '[role="tab"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+  '[role="switch"]',
+  '[role="option"]',
+  '[role="treeitem"]',
+  "[onclick]",
+  '[tabindex]:not([tabindex="-1"])'
+].join(", ");
+function interactiveTarget(el) {
+  const hit = el.closest(INTERACTIVE_SELECTOR);
+  return hit && hit !== document.documentElement && hit !== document.body ? hit : el;
+}
+function textOf(el) {
+  const htmlEl = el;
+  return (htmlEl.innerText ?? htmlEl.textContent ?? "").trim();
+}
+function extractLabel(el, mode = _labelMode) {
   const utLabel = el.getAttribute("data-ut-label");
   if (utLabel) return utLabel.trim();
+  if (mode === "none" || isMasked(el)) return null;
   const ariaLabel = el.getAttribute("aria-label");
-  if (ariaLabel) return ariaLabel.trim();
+  if (ariaLabel?.trim()) return ariaLabel.trim();
   const labelledBy = el.getAttribute("aria-labelledby");
   if (labelledBy) {
-    const ref = document.getElementById(labelledBy);
-    if (ref?.textContent) return ref.textContent.trim().slice(0, 80);
+    const parts = labelledBy.split(/\s+/).map((id) => id ? document.getElementById(id) : null).filter((ref) => !!ref && !isMasked(ref) && !isExcluded(ref)).map((ref) => textOf(ref)).filter(Boolean);
+    if (parts.length) return parts.join(" ").slice(0, 80);
   }
   const title = el.getAttribute("title");
-  if (title) return title.trim();
+  if (title?.trim()) return title.trim();
   const alt = el.getAttribute("alt");
-  if (alt) return alt.trim();
-  if (!isMasked(el)) {
-    const htmlEl = el;
-    const text = (htmlEl.innerText ?? htmlEl.textContent ?? "").trim();
-    if (text.length > 0) return text.slice(0, 50);
+  if (alt?.trim()) return alt.trim();
+  if (mode === "text") {
+    const t = textOf(el);
+    if (t.length > 0) return t.slice(0, 50);
   }
   const placeholder = el.getAttribute("placeholder");
-  if (placeholder) return placeholder.trim();
+  if (placeholder?.trim()) return placeholder.trim();
   return null;
+}
+let _screenNamer = null;
+function setScreenNamer(fn) {
+  _screenNamer = fn ?? null;
+}
+function pageName(rawUrl, stripQuery = true) {
+  const path = sanitizeUrl(rawUrl, stripQuery);
+  if (!_screenNamer) return path;
+  try {
+    const named = _screenNamer(path);
+    return typeof named === "string" && named.trim() ? named.trim() : path;
+  } catch (err) {
+    console.error("[Recap] screenName threw; using the path:", err);
+    return path;
+  }
 }
 function nearestHeading(el) {
   const headings = /* @__PURE__ */ new Set(["H1", "H2", "H3", "H4", "H5", "H6"]);
@@ -115,6 +156,7 @@ function nearestHeading(el) {
     while (sib && steps < 20) {
       steps++;
       if (headings.has(sib.tagName)) {
+        if (isMasked(sib) || isExcluded(sib)) return null;
         const htmlSib = sib;
         const text = (htmlSib.innerText ?? htmlSib.textContent ?? "").trim();
         return text.slice(0, 80) || null;
@@ -195,9 +237,10 @@ function resumeClickCapture() {
 }
 function onDocumentClick(e) {
   try {
-    const target = e.target;
-    if (!target || !_handler$2 || _paused$2) return;
-    if (isExcluded(target)) return;
+    const hit = e.target;
+    if (!hit || !_handler$2 || _paused$2 || typeof hit.closest !== "function") return;
+    if (isExcluded(hit)) return;
+    const target = interactiveTarget(hit);
     const tag = target.tagName.toUpperCase();
     const viewport = {
       width: window.innerWidth,
@@ -208,14 +251,14 @@ function onDocumentClick(e) {
     const elementY = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
     const selector = generateSelector(target);
     const label = extractLabel(target);
-    const heading = nearestHeading(target);
+    const heading = getLabelMode() === "text" ? nearestHeading(target) : null;
     const region = getPageRegion(e.clientX, e.clientY, viewport);
     const dataAttributes = extractDataAttributes(target);
     const event = {
       sessionId: getSessionId(),
       timestamp: getTimestamp(),
       type: "click",
-      url: sanitizeUrl(location.href, _stripQuery$2),
+      url: pageName(location.href, _stripQuery$2),
       viewport,
       pageX: e.pageX,
       pageY: e.pageY,
@@ -278,12 +321,13 @@ function getScrollDepth() {
 }
 function emitScroll(depth) {
   if (!_handler$1 || _paused$1) return;
+  if (document.body && isExcluded(document.body)) return;
   _maxDepth = Math.max(_maxDepth, depth);
   const event = {
     sessionId: getSessionId(),
     timestamp: getTimestamp(),
     type: "scroll",
-    url: sanitizeUrl(location.href, _stripQuery$1),
+    url: pageName(location.href, _stripQuery$1),
     viewport: { width: window.innerWidth, height: window.innerHeight },
     depth,
     maxDepth: _maxDepth
@@ -469,9 +513,9 @@ function emit(from, to, method) {
 }
 function patchHistoryMethod(original, method) {
   return function(data, unused, url) {
-    const from = sanitizeUrl(_currentUrl || location.href, _stripQuery);
+    const from = pageName(_currentUrl || location.href, _stripQuery);
     original.call(this, data, unused, url);
-    const to = sanitizeUrl(location.href, _stripQuery);
+    const to = pageName(location.href, _stripQuery);
     if (from !== to) {
       _currentUrl = location.href;
       emit(from, to, method);
@@ -480,8 +524,8 @@ function patchHistoryMethod(original, method) {
 }
 function onPopState() {
   try {
-    const from = sanitizeUrl(_currentUrl || "", _stripQuery);
-    const to = sanitizeUrl(location.href, _stripQuery);
+    const from = pageName(_currentUrl || "", _stripQuery);
+    const to = pageName(location.href, _stripQuery);
     _currentUrl = location.href;
     emit(from, to, "popstate");
   } catch (err) {
@@ -490,19 +534,24 @@ function onPopState() {
 }
 function onHashChange() {
   try {
-    const from = sanitizeUrl(_currentUrl || "", _stripQuery);
-    const to = sanitizeUrl(location.href, _stripQuery);
+    const from = pageName(_currentUrl || "", _stripQuery);
+    const to = pageName(location.href, _stripQuery);
     _currentUrl = location.href;
     emit(from, to, "hashchange");
   } catch (err) {
     console.error("[Recap] hashchange handler error:", err);
   }
 }
+function emitCurrentPage() {
+  if (!_handler) return;
+  _currentUrl = location.href;
+  emit("", pageName(location.href, _stripQuery), "pageload");
+}
 function initNavigationCapture(handler, stripQuery = true) {
   _handler = handler;
   _stripQuery = stripQuery;
   _currentUrl = location.href;
-  emit("", sanitizeUrl(location.href, _stripQuery), "pageload");
+  emit("", pageName(location.href, _stripQuery), "pageload");
   history.pushState = patchHistoryMethod(_originalPushState, "pushState");
   history.replaceState = patchHistoryMethod(_originalReplaceState, "replaceState");
   window.addEventListener("popstate", onPopState);
@@ -2990,7 +3039,12 @@ function initTouchTrigger(onTrigger, options = {}) {
     document.removeEventListener("touchcancel", onTouchEndOrCancel);
   };
 }
-const REMOTE_SDK_VERSION = "web-0.1.0";
+const REMOTE_SDK_VERSION = "web-0.2.0";
+function maskTextSelectorFor(maskText) {
+  if (maskText === true) return "*";
+  const extra = typeof maskText === "string" ? maskText.trim() : "";
+  return extra ? `.ut-mask, ${extra}` : ".ut-mask";
+}
 const KEY_START = "recap-remote-start";
 const KEY_UPLOADED = "recap-remote-uploaded";
 const KEY_SAMPLED = "recap-remote-sampled";
@@ -3096,6 +3150,23 @@ class RemoteSink {
     this.stopFns.forEach((f) => f());
     this.stopFns = [];
     void this.flush();
+  }
+  /**
+   * The visitor opted out: stop at once and delete everything not yet sent (events and
+   * recording). The browser's random id is forgotten too, so a later opt-in can't be linked to
+   * earlier visits.
+   */
+  discard() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    this.stopFns.forEach((f) => f());
+    this.stopFns = [];
+    this.endRecording("opted out: recording stopped");
+    this.queue = [];
+    try {
+      localStorage.removeItem(KEY_ANON);
+    } catch {
+    }
   }
   getSessionId() {
     return this.sessionId;
@@ -3291,6 +3362,8 @@ class RemoteSink {
       emit: (e) => this.pushDom(e),
       maskAllInputs: true,
       blockSelector: block,
+      // Text is replaced with * (same length, so the layout stays): .ut-mask always, plus maskText.
+      maskTextSelector: maskTextSelectorFor(o.maskText),
       inlineStylesheet: true,
       recordCanvas: false,
       collectFonts: false,
@@ -3391,98 +3464,125 @@ class RemoteSink {
     else console.log(`[Recap] ${msg}`);
   }
 }
+const KEY_CONSENT = "recap-consent";
 let _initialized = false;
 let _destroyFns = [];
+let _panelStops = [];
+let _config = {};
+let _scriptDefaults = {};
 let _remote = null;
+let _remoteConfig = null;
 let _early = [];
+let _consent = null;
+function consent() {
+  if (_consent === null) {
+    try {
+      const saved = localStorage.getItem(KEY_CONSENT);
+      _consent = saved === "granted" || saved === "denied" ? saved : "unknown";
+    } catch {
+      _consent = "unknown";
+    }
+  }
+  return _consent;
+}
+function saveConsent(value) {
+  _consent = value;
+  try {
+    localStorage.setItem(KEY_CONSENT, value);
+  } catch {
+  }
+}
+function allowed() {
+  const c = consent();
+  if (c === "denied") return false;
+  if (_config.requireConsent && c !== "granted") return false;
+  return true;
+}
 function capture(e) {
+  if (!allowed()) return;
   push(e);
   if (_remote) _remote.handle(e);
   else if (_early.length < 200) _early.push(e);
 }
+function given(config) {
+  const out = {};
+  for (const [k, v] of Object.entries(config)) if (v !== void 0) out[k] = v;
+  return out;
+}
+function refreshLabels() {
+  setLabelMode(_config.labels ?? (_remoteConfig || _remote ? "attributes" : "text"));
+}
+function connectIfAllowed() {
+  if (_remote || !_remoteConfig || !_initialized || !allowed()) return;
+  try {
+    const sink = new RemoteSink(_remoteConfig);
+    if (!sink.start()) return;
+    _remote = sink;
+    for (const e of _early) sink.handle(e);
+    _early = [];
+  } catch (err) {
+    console.error("[Recap] Could not connect:", err);
+  }
+}
 const Recap = {
   /**
-   * Initialize the tracker with optional config.
-   * Safe to call multiple times — subsequent calls are no-ops.
+   * Start Recap, or change its settings. The first call starts capturing; later calls change only
+   * the settings they pass (panel, labels, screen names, consent, dashboard connection).
    */
   init(config = {}) {
-    const remote = remoteFrom(config);
-    if (remote) Recap.connect(remote);
-    if (_initialized) return;
-    _initialized = true;
+    _config = { ..._scriptDefaults, ..._config, ...given(config) };
     if (config.sessionName) setSessionName(config.sessionName);
     if (config.endpoint) setEndpoint(config.endpoint);
-    const strip = config.stripQueryParams !== false;
-    void purgeOldSessions();
-    const stopBuffer = initBuffer(async (events) => {
-      await saveEvents(events);
-      if (hasEndpoint()) await sendBeaconBatch(events);
-    });
-    _destroyFns.push(stopBuffer);
-    const stopClicks = initClickCapture(capture, strip);
-    const stopScroll = initScrollCapture(capture, strip);
-    const stopNav = initNavigationCapture((e) => {
-      capture(e);
-      if (e.method !== "pageload") refreshScrollCapture();
-    }, strip);
-    _destroyFns.push(stopClicks, stopScroll, stopNav);
-    function togglePanel() {
-      if (isPanelOpen()) {
-        closePanel();
-      } else {
-        void flush().then(() => openPanel());
-      }
+    if (!_remoteConfig) _remoteConfig = remoteFrom(_config);
+    setScreenNamer(_config.screenName);
+    refreshLabels();
+    const first = !_initialized;
+    if (first) {
+      _initialized = true;
+      startCapture(_config);
     }
-    const shortcut = config.shortcut ?? "Alt+Shift+Y";
-    const onKey = (e) => {
-      if (e.repeat) return;
-      if (matchesShortcut(e, shortcut)) {
-        e.preventDefault();
-        togglePanel();
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    _destroyFns.push(() => window.removeEventListener("keydown", onKey, true));
-    if (config.touchTrigger !== false) {
-      const touchTriggerOptions = {};
-      if (config.touchTriggerFingers !== void 0) {
-        touchTriggerOptions.fingerCount = config.touchTriggerFingers;
-      }
-      if (config.touchTriggerHoldMs !== void 0) {
-        touchTriggerOptions.holdMs = config.touchTriggerHoldMs;
-      }
-      const stopTouchTrigger = initTouchTrigger(togglePanel, touchTriggerOptions);
-      _destroyFns.push(stopTouchTrigger);
-    }
-    if (config.showPanel) {
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", () => void openPanel(), { once: true });
-      } else {
-        void openPanel();
-      }
-    }
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") void flush();
-    });
+    applyPanel(first ? _config.showPanel === true : config.showPanel === true);
+    connectIfAllowed();
   },
   /**
-   * Send this session to your Recap dashboard as well (Supabase or an endpoint). Safe to call more
-   * than once; only the first call connects.
+   * Send this session to your Recap dashboard as well (Supabase or an endpoint). Call init() first.
+   * Safe to call more than once; only the first settings are used. With `requireConsent`, the
+   * connection starts once the visitor opts in.
    */
   connect(config) {
-    if (_remote) return;
-    try {
-      const sink = new RemoteSink(config);
-      if (!sink.start()) return;
-      _remote = sink;
-      for (const e of _early) sink.handle(e);
-      _early = [];
-    } catch (err) {
-      console.error("[Recap] Could not connect:", err);
-    }
+    if (!_remoteConfig) _remoteConfig = config;
+    refreshLabels();
+    connectIfAllowed();
+  },
+  /**
+   * The visitor agreed to analytics: start recording (and sending, if connected). Remembered in
+   * this browser. Needed only with `requireConsent`, or after optOut().
+   */
+  optIn() {
+    const was = _initialized && allowed();
+    saveConsent("granted");
+    if (!_initialized) return;
+    connectIfAllowed();
+    if (!was) emitCurrentPage();
+  },
+  /**
+   * The visitor said no: stop recording and sending, and delete everything not yet sent.
+   * Remembered in this browser until optIn().
+   */
+  optOut() {
+    saveConsent("denied");
+    _remote?.discard();
+    _remote = null;
+    _early = [];
+    clearBuffer();
+  },
+  /** Whether Recap is recording now: started, and not waiting for consent or opted out. */
+  isRecording() {
+    return _initialized && allowed();
   },
   /** Record a custom event, e.g. Recap.track('added_to_basket', { sku: 'A1' }). Sent only when connected. */
   track(name, props = {}) {
+    if (!allowed()) return;
     _remote?.track(name, props);
   },
   /** Manually flush the event buffer. */
@@ -3521,12 +3621,84 @@ const Recap = {
   destroy() {
     _destroyFns.forEach((fn) => fn());
     _destroyFns = [];
+    _panelStops.forEach((fn) => fn());
+    _panelStops = [];
     _remote?.stop();
     _remote = null;
+    _remoteConfig = null;
     _early = [];
+    _config = {};
+    _consent = null;
+    setScreenNamer(null);
+    setLabelMode("text");
     _initialized = false;
   }
 };
+function setScriptDefaults(config) {
+  _scriptDefaults = given(config);
+}
+function startCapture(config) {
+  const strip = config.stripQueryParams !== false;
+  void purgeOldSessions();
+  const stopBuffer = initBuffer(async (events) => {
+    await saveEvents(events);
+    if (hasEndpoint()) await sendBeaconBatch(events);
+  });
+  _destroyFns.push(stopBuffer);
+  const stopClicks = initClickCapture(capture, strip);
+  const stopScroll = initScrollCapture(capture, strip);
+  const stopNav = initNavigationCapture((e) => {
+    capture(e);
+    if (e.method !== "pageload") refreshScrollCapture();
+  }, strip);
+  _destroyFns.push(stopClicks, stopScroll, stopNav);
+  const onHide = () => {
+    if (document.visibilityState === "hidden") void flush();
+  };
+  document.addEventListener("visibilitychange", onHide);
+  _destroyFns.push(() => document.removeEventListener("visibilitychange", onHide));
+}
+function togglePanel() {
+  if (isPanelOpen()) {
+    closePanel();
+  } else {
+    void flush().then(() => openPanel());
+  }
+}
+function applyPanel(show) {
+  _panelStops.forEach((fn) => fn());
+  _panelStops = [];
+  const c = _config;
+  if (c.panel === false) {
+    if (isPanelOpen()) closePanel();
+    return;
+  }
+  if (c.shortcut !== false) {
+    const shortcut = c.shortcut ?? "Alt+Shift+Y";
+    const onKey = (e) => {
+      if (e.repeat) return;
+      if (matchesShortcut(e, shortcut)) {
+        e.preventDefault();
+        togglePanel();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    _panelStops.push(() => window.removeEventListener("keydown", onKey, true));
+  }
+  if (c.touchTrigger !== false) {
+    const touchTriggerOptions = {};
+    if (c.touchTriggerFingers !== void 0) touchTriggerOptions.fingerCount = c.touchTriggerFingers;
+    if (c.touchTriggerHoldMs !== void 0) touchTriggerOptions.holdMs = c.touchTriggerHoldMs;
+    _panelStops.push(initTouchTrigger(togglePanel, touchTriggerOptions));
+  }
+  if (show) {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", () => void openPanel(), { once: true });
+    } else {
+      void openPanel();
+    }
+  }
+}
 function remoteFrom(config) {
   if (config.remote) return config.remote;
   if (!config.supabase?.url || !config.supabase.anonKey) return null;
@@ -3550,52 +3722,9 @@ function matchesShortcut(e, shortcut) {
   const codeKey = e.code.replace(/^Key/, "").replace(/^Digit/, "");
   return codeKey === key && (!needsCtrl || ctrlOrMeta) && (!needsShift || e.shiftKey) && (!needsMeta || e.metaKey) && (!needsAlt || e.altKey);
 }
-function readScriptConfig() {
-  let script = null;
-  if (typeof document !== "undefined" && document.currentScript) {
-    script = document.currentScript;
-  } else {
-    const scripts = document.querySelectorAll("script[src]");
-    for (const s of Array.from(scripts)) {
-      if (s.src.includes("recap")) {
-        script = s;
-        break;
-      }
-    }
-  }
-  if (!script || !("dataset" in script)) return {};
-  const el = script;
-  const config = {};
-  if (el.dataset["sessionName"]) config.sessionName = el.dataset["sessionName"];
-  if (el.dataset["showPanel"] === "true") config.showPanel = true;
-  if (el.dataset["endpoint"]) config.endpoint = el.dataset["endpoint"];
-  if (el.dataset["supabaseUrl"] && el.dataset["supabaseKey"]) {
-    config.supabase = { url: el.dataset["supabaseUrl"], anonKey: el.dataset["supabaseKey"] };
-  }
-  if (el.dataset["appId"]) config.appId = el.dataset["appId"];
-  if (el.dataset["appVersion"]) config.appVersion = el.dataset["appVersion"];
-  if (el.dataset["recordings"] === "true") config.recordings = true;
-  if (el.dataset["shortcut"]) config.shortcut = el.dataset["shortcut"];
-  if (el.dataset["stripQueryParams"] === "false") config.stripQueryParams = false;
-  if (el.dataset["touchTrigger"] === "false") config.touchTrigger = false;
-  if (el.dataset["touchTriggerFingers"]) {
-    config.touchTriggerFingers = parseInt(el.dataset["touchTriggerFingers"], 10);
-  }
-  if (el.dataset["touchTriggerHoldMs"]) {
-    config.touchTriggerHoldMs = parseInt(el.dataset["touchTriggerHoldMs"], 10);
-  }
-  return config;
-}
-if (typeof window !== "undefined" && typeof document !== "undefined") {
-  const autoConfig = readScriptConfig();
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => Recap.init(autoConfig), { once: true });
-  } else {
-    Recap.init(autoConfig);
-  }
-}
 export {
   Recap,
   Recap as default,
+  setScriptDefaults,
   summarize
 };

@@ -6,7 +6,9 @@ Recap is organised into three layers: **capture**, **storage**, and **visualisat
 
 ```
 src/
-  index.ts              # Public API, init, keyboard shortcut, auto-init from script tag
+  index.ts              # Public API, init (re-runnable settings), panel shortcut, consent. Entry for the ES/CJS builds: starts nothing on import
+  browser.ts            # Entry for the script-tag build (dist/recap.min.js): same API, starts itself
+  script-tag.ts         # Finds Recap's own <script> tag and reads its data-* settings
   react.tsx             # React component wrapper (separate sub-export: recap-ux/react)
   types.ts              # Shared TypeScript types
   capture/
