@@ -52,6 +52,7 @@ export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.1
     });
   }, [sorted]);
 
+  const frameTimes = useMemo(() => frames.filter((f) => f.image).map((f) => f.t_ms), [frames]);
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
@@ -68,8 +69,12 @@ export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.1
       last.current = now;
       let next = tRef.current + (now - prev) * speed;
       if (skipIdle) {
-        const upcoming = sorted.find((e) => e.t_ms > tRef.current);
-        if (upcoming && upcoming.t_ms - next > IDLE_GAP_MS) next = upcoming.t_ms - 600;
+        // Recording frames are only stored when the screen changed, so they count as activity too:
+        // a scroll has frames but few events, and must not be skipped as a pause.
+        const nextEvent = sorted.find((e) => e.t_ms > tRef.current)?.t_ms ?? Infinity;
+        const nextFrame = frameTimes.find((ft) => ft > tRef.current) ?? Infinity;
+        const upcoming = Math.min(nextEvent, nextFrame);
+        if (upcoming !== Infinity && upcoming - next > IDLE_GAP_MS) next = upcoming - 600;
       }
       if (next >= end) {
         setT(end);
@@ -84,7 +89,7 @@ export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.1
       if (raf.current) cancelAnimationFrame(raf.current);
       last.current = null;
     };
-  }, [playing, speed, skipIdle, sorted, end]);
+  }, [playing, speed, skipIdle, sorted, frameTimes, end]);
 
   // What the phone looks like at time t.
   const past = sorted.filter((e) => e.t_ms <= t);
@@ -98,6 +103,7 @@ export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.1
   const current = [...past].reverse().find((e) => e.type !== 'screen') ?? past[past.length - 1];
   const recorded = frames.length > 0;
   let frame: Frame | undefined;
+  let blend: { image: string; amount: number } | null = null;
   if (recorded) {
     // Latest frame at or before t (frames are sorted); before the first one, show the first.
     let lo = 0;
@@ -108,6 +114,12 @@ export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.1
       else hi = mid - 1;
     }
     frame = frames[lo];
+    // Between two close frames (a scroll), blend towards the next one so motion looks continuous
+    // rather than stepping from picture to picture.
+    const after = frames[lo + 1];
+    if (frame && after && frame.image && after.image && frame.t_ms <= t && after.t_ms - frame.t_ms <= 700) {
+      blend = { image: after.image, amount: Math.min(1, (t - frame.t_ms) / (after.t_ms - frame.t_ms)) };
+    }
   }
   const hidden = recorded && frame?.image === null;
   const picture = recorded ? (frame?.image ? { image: frame.image, width: null, height: null } : pictures[screen]) : pictures[screen];
@@ -150,8 +162,12 @@ export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.1
         <div className="phone replay-phone" style={{ width, height }}>
           {picture ? (
             <>
-              {layers.prev && layers.prev !== src && <img src={layers.prev} alt="" aria-hidden className="phone-bg replay-bg" />}
-              <img key={src} src={src} alt={`${screen} screen`} className="phone-bg replay-bg replay-fade" />
+              {/* Screen pictures fade from one screen to the next; recordings blend frame to frame instead. */}
+              {!recorded && layers.prev && layers.prev !== src && (
+                <img src={layers.prev} alt="" aria-hidden className="phone-bg replay-bg" />
+              )}
+              <img key={recorded ? 'frame' : src} src={src} alt={`${screen} screen`} className={`phone-bg replay-bg${recorded ? '' : ' replay-fade'}`} />
+              {blend && <img src={blend.image} alt="" aria-hidden className="phone-bg replay-bg" style={{ opacity: blend.amount }} />}
             </>
           ) : (
             <div className="phone-grid replay-missing">
@@ -231,7 +247,7 @@ export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.1
           />
           <div className="scrubber-marks" aria-hidden>
             {sorted
-              .filter((e) => e.type === 'screen' || e.type === 'tap' || e.type === 'custom')
+              .filter((e) => e.type === 'screen' || e.type === 'tap' || e.type === 'custom' || e.type === 'scroll')
               .map((e) => (
                 <i
                   key={e.id}
@@ -243,7 +259,7 @@ export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.1
         </div>
         <p className="muted small replay-legend">
           <i className="mark mark-screen" /> screen change <i className="mark mark-tap" /> tap <i className="mark mark-rage" /> repeated
-          taps <i className="mark mark-custom" /> event
+          taps <i className="mark mark-custom" /> event <i className="mark mark-scroll" /> scroll
         </p>
 
         <ol className="replay-log" ref={listRef}>
