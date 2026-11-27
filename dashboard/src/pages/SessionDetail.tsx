@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Heatmap } from '../components/Heatmap';
 import { Replay } from '../components/Replay';
-import { deleteSession, getEvents, getFrames, getSession, screenshotFor, screenshotsFor } from '../lib/data';
+import { WebReplay } from '../components/WebReplay';
+import { deleteSession, getDomRecording, getEvents, getFrames, getSession, screenshotFor, screenshotsFor } from '../lib/data';
 import { summaryForAI } from '../lib/summary';
 import type { EventRow, SessionRow } from '../lib/types';
 import { formatDateTime, formatDuration, go, sessionSeconds, useAsync } from '../lib/util';
@@ -90,6 +91,10 @@ function Detail({
   const screens = useMemo(() => [...new Set(events.map((e) => e.screen).filter((x): x is string => !!x))], [events]);
   const pictures = useAsync(() => screenshotsFor(session.app_id, screens), [session.app_id, screens.join('|')]);
   const frames = useAsync(() => getFrames(session.id), [session.id]);
+  const dom = useAsync(
+    () => (session.platform === 'web' ? getDomRecording(session.id) : Promise.resolve({ events: [], startMs: 0 })),
+    [session.id, session.platform],
+  );
   const points = (visit?.events ?? [])
     .filter((e) => e.type === 'tap')
     .map((e) => ({ nx: Number(e.data.nx ?? 0), ny: Number(e.data.ny ?? 0) }));
@@ -140,6 +145,9 @@ function Detail({
       {copied && <p className="ok">{copied}</p>}
 
       <h3>Replay</h3>
+      {dom.data && dom.data.events.length > 1 ? (
+        <WebReplay events={events} recording={dom.data.events} startMs={dom.data.startMs} describe={describe} />
+      ) : (
       <Replay
         events={events}
         durationMs={duration * 1000}
@@ -148,6 +156,7 @@ function Detail({
         describe={describe}
         {...(aspect ? { aspect } : {})}
       />
+      )}
 
       <h3>Screen by screen</h3>
 

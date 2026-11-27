@@ -197,6 +197,38 @@ export async function getFrames(sessionId: string): Promise<Frame[]> {
   return out;
 }
 
+/** One rrweb event from a web page recording. */
+export interface DomEvent {
+  type: number;
+  timestamp: number;
+  [key: string]: unknown;
+}
+
+/**
+ * A website's page recording (rrweb events), oldest first, plus when it starts in the session's
+ * timeline. Empty when the session isn't a recorded web session.
+ */
+export async function getDomRecording(sessionId: string): Promise<{ events: DomEvent[]; startMs: number }> {
+  const events: DomEvent[] = [];
+  let startMs = 0;
+  for (let from = 0; from < 2000; from += 100) {
+    const res = await db()
+      .from('recap_dom')
+      .select('t_ms,events')
+      .eq('session_id', sessionId)
+      .order('t_ms', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + 99);
+    if (res.error) break; // older databases without the web recordings migration
+    const rows = (res.data ?? []) as { t_ms: number; events: DomEvent[] }[];
+    if (from === 0 && rows[0]) startMs = rows[0].t_ms;
+    for (const r of rows) if (Array.isArray(r.events)) events.push(...r.events);
+    if (rows.length < 100) break;
+  }
+  events.sort((a, b) => a.timestamp - b.timestamp);
+  return { events, startMs };
+}
+
 export interface LabelCount {
   label: string;
   count: number;

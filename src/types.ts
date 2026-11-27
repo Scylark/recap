@@ -1,6 +1,9 @@
 // Recap UX — shared TypeScript interfaces
 // All types are self-contained — no external type dependencies.
 
+import type { RemoteConfig } from './remote/remote.js';
+export type { RemoteConfig, RemoteRecordingOptions, RrwebRecord } from './remote/remote.js';
+
 export type EventType = 'click' | 'scroll' | 'navigation' | 'visibility' | 'resize';
 
 export interface Viewport {
@@ -95,6 +98,13 @@ export interface RecapConfig {
   touchTriggerFingers?: number;
   /** Milliseconds the touch points must be held before the panel toggles. Default: 1500. */
   touchTriggerHoldMs?: number;
+
+  /**
+   * Also send sessions to your own Supabase project (or an endpoint), for the Recap dashboard:
+   * analytics, funnels, heatmaps and page replays next to your iOS and Android sessions.
+   * Leave it out and nothing leaves the browser.
+   */
+  remote?: RemoteConfig;
 }
 
 // --- Session summary (AI export) ---

@@ -16,7 +16,8 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.119.2",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "rrweb": "2.2.2"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",

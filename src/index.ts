@@ -14,11 +14,21 @@ import { openPanel, closePanel, isPanelOpen } from './viz/panel.js';
 import { initTouchTrigger, type TouchTriggerOptions } from './capture/touch-trigger.js';
 import { summarize } from './analysis/summarize.js';
 import { exportJSON, exportCSV, exportSummaryJSON } from './storage/export.js';
+import { RemoteSink, type RemoteConfig } from './remote/remote.js';
 
 // --- State ---
 
 let _initialized = false;
 let _destroyFns: Array<() => void> = [];
+let _remote: RemoteSink | null = null;
+/** Events seen before connect() was called, so the first page view isn't lost. */
+let _early: AnyEvent[] = [];
+
+function capture(e: AnyEvent): void {
+  push(e);
+  if (_remote) _remote.handle(e);
+  else if (_early.length < 200) _early.push(e);
+}
 
 // --- Public API ---
 
@@ -28,6 +38,8 @@ export const Recap = {
    * Safe to call multiple times — subsequent calls are no-ops.
    */
   init(config: RecapConfig = {}): void {
+    // Loading the module auto-starts Recap; a later init() with `remote` still connects it.
+    if (config.remote) Recap.connect(config.remote);
     if (_initialized) return;
     _initialized = true;
 
@@ -57,10 +69,10 @@ export const Recap = {
     _destroyFns.push(stopBuffer);
 
     // Start capture layers
-    const stopClicks = initClickCapture((e) => push(e), strip);
-    const stopScroll = initScrollCapture((e) => push(e), strip);
+    const stopClicks = initClickCapture(capture, strip);
+    const stopScroll = initScrollCapture(capture, strip);
     const stopNav = initNavigationCapture((e) => {
-      push(e);
+      capture(e);
       if (e.method !== 'pageload') refreshScrollCapture();
     }, strip);
 
@@ -118,9 +130,31 @@ export const Recap = {
     });
   },
 
+  /**
+   * Send this session to your Recap dashboard as well (Supabase or an endpoint). Safe to call more
+   * than once; only the first call connects.
+   */
+  connect(config: RemoteConfig): void {
+    if (_remote) return;
+    try {
+      const sink = new RemoteSink(config);
+      if (!sink.start()) return;
+      _remote = sink;
+      for (const e of _early) sink.handle(e);
+      _early = [];
+    } catch (err) {
+      console.error('[Recap] Could not connect:', err);
+    }
+  },
+
+  /** Record a custom event, e.g. Recap.track('added_to_basket', { sku: 'A1' }). Sent only when connected. */
+  track(name: string, props: Record<string, unknown> = {}): void {
+    _remote?.track(name, props);
+  },
+
   /** Manually flush the event buffer. */
   flush(): Promise<void> {
-    return flush();
+    return Promise.all([flush(), _remote?.flush()]).then(() => undefined);
   },
 
   /** Get the current session ID. */
@@ -161,6 +195,9 @@ export const Recap = {
   destroy(): void {
     _destroyFns.forEach((fn) => fn());
     _destroyFns = [];
+    _remote?.stop();
+    _remote = null;
+    _early = [];
     _initialized = false;
   },
 };
@@ -235,6 +272,20 @@ function readScriptConfig(): RecapConfig {
   }
   if (el.dataset['touchTriggerHoldMs']) {
     config.touchTriggerHoldMs = parseInt(el.dataset['touchTriggerHoldMs'], 10);
+  }
+
+  // Remote mode: <script src="recap.min.js" data-app-id="my-site" data-supabase-url="…" data-supabase-key="…">
+  const appId = el.dataset['appId'];
+  const url = el.dataset['supabaseUrl'];
+  const anonKey = el.dataset['supabaseKey'];
+  if (appId && url && anonKey) {
+    config.remote = {
+      appId,
+      supabase: { url, anonKey },
+      ...(el.dataset['recordings'] === 'true' ? { recordings: true } : {}),
+      ...(el.dataset['appVersion'] ? { appVersion: el.dataset['appVersion'] } : {}),
+      ...(el.dataset['debug'] === 'true' ? { debug: true } : {}),
+    };
   }
 
   return config;

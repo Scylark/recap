@@ -62,6 +62,34 @@ your own phone in about 20 minutes: [docs/try-it-on-your-phone.md](./docs/try-it
 
 ![Recap dashboard](./docs/images/dashboard-session.png)
 
+## Websites and web apps in the same dashboard (beta)
+
+The web script can send sessions to the same Supabase project and dashboard as your mobile apps, so web,
+iOS and Android sit side by side in one set of analytics. Leave `remote` out and Recap keeps working the
+original way, with nothing leaving the browser.
+
+```js
+import Recap from 'recap-ux';
+import { record } from 'rrweb'; // optional: page recordings for replay
+
+Recap.init({
+  remote: {
+    appId: 'my-site',
+    supabase: { url: 'https://your-project.supabase.co', anonKey: 'sb_publishable_…' },
+    recordings: { record }, // leave out for analytics and heatmaps only
+  },
+});
+Recap.track('signed_up', { plan: 'pro' }); // custom events for funnels
+```
+
+Or with a script tag: `<script src="…/recap.min.js" data-app-id="my-site" data-supabase-url="…" data-supabase-key="…"></script>`
+(add `data-recordings="true"` and load rrweb's script first for replays).
+
+Page recordings use [rrweb](https://github.com/rrweb-io/rrweb): they capture the page's structure and changes rather than
+pictures, so replays are sharp and smooth, scrolling and open menus included. Every form field is masked, and anything
+marked `class="recap-private"` or `data-ut-no-track` is left out. They need `supabase/migrations/*_recap_dom.sql`.
+Try it with the test shop in [`examples/web-test-shop/`](./examples/web-test-shop).
+
 ## Quick start
 
 Add one line to any prototype:

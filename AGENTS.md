@@ -27,7 +27,7 @@ app owner controls:
 | SDK | `sdk-react-native/` | React Native / Expo package `@recap-ux/react-native` |
 | Database | `supabase/migrations/` | SQL files: tables, security rules, ingest, analytics functions, screen pictures |
 | Dashboard | `dashboard/` | Static React app the owner deploys and signs in to |
-| Web prototypes | `src/` | The original `recap-ux` script for web prototypes (separate, unchanged) |
+| Web | `src/` | The `recap-ux` web script. On its own it keeps data in the browser; with `remote` it sends to the same database and dashboard (see "Websites and web apps" below) |
 
 Supported today: **React Native 0.72+ and Expo SDK 50+ (tested on SDK 54 and 58), iOS and Android.** Native Swift/Kotlin and Flutter
 are not available yet. If the app is not React Native, tell the developer that and stop.
@@ -271,6 +271,17 @@ default; for a team, also consider turning off open sign-ups (only listed member
 
 If nothing arrives: check the URL and anon key, that the SQL ran without errors, and that the device has
 network access. Upload errors are logged when `debug` is on.
+
+## Websites and web apps
+
+If the developer also has a website or web app, it can report to the same database and dashboard.
+1. Install `recap-ux` (and `rrweb@2.2.2` if they want page replays) and call `Recap.init({ remote: { appId, supabase: { url, anonKey }, recordings: { record } } })`
+   once at start-up, with a different `appId` from the mobile app (e.g. `my-shop-web`). See the README for the script-tag version.
+2. Run `supabase/migrations/20261127030000_recap_dom.sql` if they turn on recordings.
+3. **Ask** which parts of the site show personal details (account pages, order history, messages) and add
+   `class="recap-private"` to them. Form fields are always masked.
+4. Add `Recap.track('event_name', { … })` for the steps that matter (sign-up, add to basket, purchase), as on mobile.
+5. Verify: browse the site with the browser console open (`debug: true`), then check the session in the dashboard.
 
 ## Configuration reference
 

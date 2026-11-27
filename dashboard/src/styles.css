@@ -280,3 +280,11 @@ tr.selected td { background: var(--accent-soft); }
 }
 .replay-hidden span { font-size: 28px; }
 .replay-hidden small { font-weight: 400; color: #64748b; font-size: 12px; }
+
+/* Web page recordings (rrweb) */
+.web-replay { display: grid; gap: 12px; margin-bottom: 8px; }
+.web-replay-stage { position: relative; width: 100%; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.web-replay-page { transform-origin: top left; position: absolute; top: 0; left: 0; }
+.web-replay-page .replayer-wrapper { position: relative; }
+.web-replay-page iframe { border: 0; background: #fff; }
+.web-replay-stage .replay-mode { z-index: 2; left: auto; right: 10px; top: auto; bottom: 8px; }
