@@ -448,7 +448,7 @@ export default function App() {
     <RecapProvider
       navigationRef={navigationRef}
       captureRef={capture}
-      device={{ model: 'Playwright phone' }}
+      device={globalThis.__RECAP_E2E__ ? { model: 'Playwright phone' } : undefined}
       config={{ appId: 'test-shop', supabase: { url: cfg.url, anonKey: cfg.anonKey }, storage: AsyncStorage, appVersion: '1.1.0', flushIntervalMs: 2000, debug: true, screenshots: true, recordings: true }}
     >
       <BasketContext.Provider value={basket}>
