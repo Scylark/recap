@@ -7,7 +7,7 @@
 
 import type { AnyEvent } from '../types.js';
 import { getSessionId } from '../capture/session.js';
-import { EXCLUDE_SELECTOR, MASK_SELECTOR } from '../privacy/sanitize.js';
+import { EXCLUDE_SELECTOR, MASK_SELECTOR, sanitizeHref } from '../privacy/sanitize.js';
 import { secretKeyKind, secretKeyMessage } from '../gate.js';
 
 export const REMOTE_SDK_VERSION = 'web-0.3.0';
@@ -139,6 +139,11 @@ export interface RemoteConfig {
   sampleRate?: number;
   /** Page recordings for session replay. Typing is always masked. Off by default. */
   recordings?: boolean | RemoteRecordingOptions;
+  /**
+   * Remove the query string from the page address sent with recordings (the hash is always
+   * removed). Default true; the web tracker passes on its own `stripQueryParams`.
+   */
+  stripQueryParams?: boolean;
   /** Log what Recap is doing to the console. */
   debug?: boolean;
 }
@@ -663,7 +668,7 @@ export class RemoteSink {
 
   private pushDom(event: RrwebEvent): void {
     if (!this.recordFn || this.recordingBlocked) return;
-    const e = event;
+    const e = this.cleanDom(event);
     const n = utf8Bytes(JSON.stringify(e));
     if (e.type === 2) {
       this.log(`full snapshot: ${Math.round(n / 1000)} KB`);
@@ -695,6 +700,19 @@ export class RemoteSink {
       return;
     }
     if (this.domBytes >= DOM_CHUNK_BYTES && this.uploaded) void this.sendDom();
+  }
+
+  /**
+   * An rrweb event as it may be stored. Meta events carry the page address: keep its origin and
+   * path (the Replayer needs an absolute address to load relative images and stylesheets) and drop
+   * the hash and, unless stripQueryParams is false, the query string, which can hold ids and
+   * tokens. Same rules as the addresses of page views, but without the screenName hook.
+   */
+  private cleanDom(e: RrwebEvent): RrwebEvent {
+    if (e.type !== 4) return e;
+    const data = e['data'] as Record<string, unknown> | undefined;
+    if (!data || typeof data['href'] !== 'string') return e;
+    return { ...e, data: { ...data, href: sanitizeHref(data['href'], this.config.stripQueryParams !== false) } };
   }
 
   /** The oldest buffered events, up to maxBytes. Always at least one, so a big snapshot goes alone. */

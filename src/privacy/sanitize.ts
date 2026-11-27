@@ -20,6 +20,22 @@ export function sanitizeUrl(rawUrl: string, stripQuery = true): string {
 }
 
 /**
+ * A page address for a recording: origin and path, with the query string only when it is kept
+ * (`stripQuery` false) and never the hash. Same rules as sanitizeUrl, plus the origin, because the
+ * Replayer needs an absolute address to load the page's relative images and stylesheets. Never
+ * passed through the screenName hook: it must stay an address.
+ */
+export function sanitizeHref(rawUrl: string, stripQuery = true): string {
+  try {
+    const base = typeof location !== 'undefined' ? location.href : 'https://localhost';
+    const url = new URL(rawUrl, base);
+    return url.origin + sanitizeUrl(url.href, stripQuery);
+  } catch {
+    return sanitizeUrl(rawUrl, true);
+  }
+}
+
+/**
  * The privacy marker: elements (and everything inside them) that are never tracked. No taps are
  * counted there, they are left out of recordings, and on <html> or <body> scroll depth stops too.
  * `data-recap-private` and `class="recap-private"` are the documented names; `data-ut-no-track`

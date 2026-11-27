@@ -247,6 +247,27 @@ describe('excludePaths', () => {
   });
 });
 
+describe('page addresses in recordings', () => {
+  async function metaHref(extra: Record<string, unknown>): Promise<unknown> {
+    const { bodies } = stubFetch();
+    const { record } = recorder(); // its Meta event carries location.href
+    at('/coach-rider.html?rider=abc#x');
+    Recap.init({ supabase, recordings: { record }, ...extra });
+    await Recap.flush();
+    await Recap.flush();
+    const dom = bodies.filter((b) => b.url.endsWith('recap_dom')).flatMap((b) => (b.payload as unknown as { events: RrwebEvent[] }).events);
+    return (dom.find((e) => e.type === 4)?.['data'] as { href?: string } | undefined)?.href;
+  }
+
+  it('keep origin and path, never the query string or hash', async () => {
+    expect(await metaHref({})).toBe(`${location.origin}/coach-rider.html`);
+  });
+
+  it('keep the query string (not the hash) with stripQueryParams: false', async () => {
+    expect(await metaHref({ stripQueryParams: false })).toBe(`${location.origin}/coach-rider.html?rider=abc`);
+  });
+});
+
 describe('Global Privacy Control', () => {
   const gpc = () => Object.defineProperty(navigator, 'globalPrivacyControl', { value: true, configurable: true });
 

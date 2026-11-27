@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RemoteSink, canvasFps, setDefaultRrwebSrc, type RemoteConfig, type RrwebEvent } from '../../src/remote/remote';
+import { setScreenNamer } from '../../src/privacy/sanitize';
 
 type Call = { url: string; payload: { events: { type: number; data: Record<string, unknown> }[] } };
 
@@ -35,6 +36,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   delete w.rrweb;
   setDefaultRrwebSrc(null);
+  setScreenNamer(null);
   document.head.innerHTML = '';
 });
 
@@ -167,6 +169,38 @@ describe('recording options', () => {
     const block = String(optionsFor({})['blockSelector']);
     for (const s of ['[data-recap-private]', '.recap-private', '[data-ut-no-track]', '.ut-block']) expect(block).toContain(s);
     expect(String(optionsFor({ blockSelector: '.chat' })['blockSelector'])).toContain('.chat');
+  });
+});
+
+describe('recorded page addresses', () => {
+  async function hrefSent(config: Partial<RemoteConfig>, href: string): Promise<unknown> {
+    const { fn, dom } = fakeFetch();
+    const record = (opts: { emit: (e: RrwebEvent) => void }) => {
+      opts.emit({ type: 4, timestamp: Date.now(), data: { href, width: 400, height: 800 } });
+      return () => undefined;
+    };
+    const sink = new RemoteSink({ ...base, ...config, recordings: { record } }, fn);
+    sink.start();
+    sink.handle(nav);
+    await sink.flush();
+    sink.stop();
+    sessionStorage.clear();
+    return dom().find((e) => e.type === 4)?.data['href'];
+  }
+
+  it('drops the query string and hash from Meta events, keeping origin and path', async () => {
+    expect(await hrefSent({}, 'https://shop.example/coach-rider.html?rider=abc#x')).toBe('https://shop.example/coach-rider.html');
+  });
+
+  it('keeps the query (never the hash) with stripQueryParams: false', async () => {
+    expect(await hrefSent({ stripQueryParams: false }, 'https://shop.example/coach-rider.html?rider=abc#x')).toBe(
+      'https://shop.example/coach-rider.html?rider=abc',
+    );
+  });
+
+  it('does not run the screenName hook on it: it stays an address', async () => {
+    setScreenNamer(() => 'Coach');
+    expect(await hrefSent({}, 'https://shop.example/coach-rider.html?rider=abc')).toBe('https://shop.example/coach-rider.html');
   });
 });
 

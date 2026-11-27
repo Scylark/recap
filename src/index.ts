@@ -220,9 +220,13 @@ function refreshLabels(): void {
   setLabelMode(_config.labels ?? (connected() ? 'attributes' : 'text'));
 }
 
-/** The dashboard settings with this page's debug setting on top. */
+/** The dashboard settings with this page's debug and query-string settings on top. */
 function sinkConfig(rc: RemoteConfig): RemoteConfig {
-  return { ...rc, ...(debugOn() ? { debug: true } : {}) };
+  return {
+    ...rc,
+    ...(debugOn() ? { debug: true } : {}),
+    ...(rc.stripQueryParams === undefined && _config.stripQueryParams === false ? { stripQueryParams: false } : {}),
+  };
 }
 
 function connectIfAllowed(): void {
