@@ -11,8 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: sdk-react-native } }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with: { node-version: 22 }
       - run: npm ci
       - run: npm run typecheck
@@ -22,8 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: dashboard } }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with: { node-version: 22 }
       - run: npm ci
       - run: npm test
@@ -39,7 +39,7 @@ jobs:
         options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     env: { PGHOST: localhost, PGUSER: postgres, PGPASSWORD: postgres, PGDATABASE: postgres }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Every migration has its own version (supabase db push needs this)
         run: test -z "$(ls supabase/migrations/*.sql | xargs -n1 basename | cut -d_ -f1 | sort | uniq -d)"
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/supabase-shim.sql
@@ -53,7 +53,7 @@ jobs:
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/dom.sql
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/storage-limits.sql
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/dom-limits.sql
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: 22 }
       - name: Analytics in the database match the demo's numbers
         working-directory: dashboard
