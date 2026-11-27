@@ -26,10 +26,11 @@ export function resumeScrollCapture(): void { _paused = false; }
 
 function getScrollDepth(): number {
   const scrollTop = window.scrollY || document.documentElement.scrollTop;
+  const body = document.body;
   const docHeight = Math.max(
-    document.body.scrollHeight,
+    body?.scrollHeight ?? 0,
     document.documentElement.scrollHeight,
-    document.body.offsetHeight,
+    body?.offsetHeight ?? 0,
     document.documentElement.offsetHeight
   );
   const viewHeight = window.innerHeight;
@@ -66,10 +67,9 @@ function emitScroll(depth: number): void {
 
 function createSentinels(): void {
   removeSentinels();
-  const docHeight = Math.max(
-    document.body.scrollHeight,
-    document.documentElement.scrollHeight
-  );
+  const body = document.body;
+  if (!body) return; // no <body> yet: initScrollCapture waits for one
+  const docHeight = Math.max(body.scrollHeight, document.documentElement.scrollHeight);
 
   _sentinels = MILESTONES.map((pct) => {
     const el = document.createElement('div');
@@ -84,7 +84,7 @@ function createSentinels(): void {
       top: `${Math.floor((docHeight * pct) / 100)}px`,
       left: '0',
     });
-    document.body.appendChild(el);
+    body.appendChild(el);
     return el;
   });
 }
@@ -95,10 +95,7 @@ function removeSentinels(): void {
 }
 
 function recalculateSentinelPositions(): void {
-  const docHeight = Math.max(
-    document.body.scrollHeight,
-    document.documentElement.scrollHeight
-  );
+  const docHeight = Math.max(document.body?.scrollHeight ?? 0, document.documentElement.scrollHeight);
   _sentinels.forEach((s, i) => {
     const pct = MILESTONES[i] ?? 100;
     s.style.top = `${Math.floor((docHeight * pct) / 100)}px`;
@@ -184,15 +181,24 @@ export function initScrollCapture(handler: ScrollHandler, stripQuery = true): ()
   // Measure the page after the host has rendered. SPAs often render their content
   // after Recap.init(); measuring now would place the milestone sentinels on an
   // empty shell, where they fire immediately and lock maxDepth at 100.
-  _initTimer = setTimeout(() => {
-    _initTimer = null;
-    try {
-      createSentinels();
-      setupObserver();
-    } catch (err) {
-      console.error('[Recap] Scroll sentinel setup error:', err);
-    }
-  }, 0);
+  const setup = (): void => {
+    _initTimer = setTimeout(() => {
+      _initTimer = null;
+      try {
+        createSentinels();
+        setupObserver();
+      } catch (err) {
+        console.error('[Recap] Scroll sentinel setup error:', err);
+      }
+    }, 0);
+  };
+  if (document.body) {
+    setup();
+  } else {
+    // Started from a script in <head>, before the page has a <body>: wait for it.
+    document.addEventListener('DOMContentLoaded', setup, { once: true });
+    _cleanupFns.push(() => document.removeEventListener('DOMContentLoaded', setup));
+  }
 
   startContinuousTracking();
 

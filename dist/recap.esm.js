@@ -308,10 +308,11 @@ function resumeScrollCapture() {
 }
 function getScrollDepth() {
   const scrollTop = window.scrollY || document.documentElement.scrollTop;
+  const body = document.body;
   const docHeight = Math.max(
-    document.body.scrollHeight,
+    body?.scrollHeight ?? 0,
     document.documentElement.scrollHeight,
-    document.body.offsetHeight,
+    body?.offsetHeight ?? 0,
     document.documentElement.offsetHeight
   );
   const viewHeight = window.innerHeight;
@@ -340,10 +341,9 @@ function emitScroll(depth) {
 }
 function createSentinels() {
   removeSentinels();
-  const docHeight = Math.max(
-    document.body.scrollHeight,
-    document.documentElement.scrollHeight
-  );
+  const body = document.body;
+  if (!body) return;
+  const docHeight = Math.max(body.scrollHeight, document.documentElement.scrollHeight);
   _sentinels = MILESTONES$1.map((pct) => {
     const el = document.createElement("div");
     el.setAttribute("aria-hidden", "true");
@@ -357,7 +357,7 @@ function createSentinels() {
       top: `${Math.floor(docHeight * pct / 100)}px`,
       left: "0"
     });
-    document.body.appendChild(el);
+    body.appendChild(el);
     return el;
   });
 }
@@ -366,10 +366,7 @@ function removeSentinels() {
   _sentinels = [];
 }
 function recalculateSentinelPositions() {
-  const docHeight = Math.max(
-    document.body.scrollHeight,
-    document.documentElement.scrollHeight
-  );
+  const docHeight = Math.max(document.body?.scrollHeight ?? 0, document.documentElement.scrollHeight);
   _sentinels.forEach((s, i) => {
     const pct = MILESTONES$1[i] ?? 100;
     s.style.top = `${Math.floor(docHeight * pct / 100)}px`;
@@ -433,15 +430,23 @@ function initScrollCapture(handler, stripQuery = true) {
   _stripQuery$1 = stripQuery;
   _maxDepth = 0;
   _lastLoggedDepth = 0;
-  _initTimer = setTimeout(() => {
-    _initTimer = null;
-    try {
-      createSentinels();
-      setupObserver();
-    } catch (err) {
-      console.error("[Recap] Scroll sentinel setup error:", err);
-    }
-  }, 0);
+  const setup = () => {
+    _initTimer = setTimeout(() => {
+      _initTimer = null;
+      try {
+        createSentinels();
+        setupObserver();
+      } catch (err) {
+        console.error("[Recap] Scroll sentinel setup error:", err);
+      }
+    }, 0);
+  };
+  if (document.body) {
+    setup();
+  } else {
+    document.addEventListener("DOMContentLoaded", setup, { once: true });
+    _cleanupFns$1.push(() => document.removeEventListener("DOMContentLoaded", setup));
+  }
   startContinuousTracking();
   window.addEventListener("resize", onResize, { passive: true });
   _cleanupFns$1.push(() => window.removeEventListener("resize", onResize));

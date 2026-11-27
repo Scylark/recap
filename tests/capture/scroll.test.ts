@@ -101,4 +101,30 @@ describe('scroll capture', () => {
 
     cleanup();
   });
+
+  it('waits for <body> when started from a script in <head>', async () => {
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        observe(): void {}
+        disconnect(): void {}
+      },
+    );
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const body = document.body;
+    document.documentElement.removeChild(body);
+    const state = vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading');
+    const cleanup = initScrollCapture(vi.fn());
+    await nextTick();
+    expect(errors).not.toHaveBeenCalled();
+    document.documentElement.appendChild(body);
+    state.mockReturnValue('interactive');
+    document.dispatchEvent(new Event('DOMContentLoaded'));
+    await nextTick();
+    expect(document.querySelectorAll('[data-recap-sentinel]').length).toBe(4);
+    expect(errors).not.toHaveBeenCalled();
+    cleanup();
+    state.mockRestore();
+    errors.mockRestore();
+  });
 });
