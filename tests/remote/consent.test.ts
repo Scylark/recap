@@ -89,4 +89,22 @@ describe('web consent', () => {
     await Recap.flush();
     expect(bodies.length).toBeGreaterThan(0);
   });
+
+  it('follows an opt-out made in another tab', async () => {
+    const { events } = stubFetch();
+    Recap.init({ appId: 'site', supabase, panel: false });
+    (document.getElementById('b') as HTMLElement).click();
+    await Recap.flush();
+    const before = events().length;
+    expect(before).toBeGreaterThan(0);
+    // Another tab of the same site opts out: it writes the shared key, and this tab gets a storage event.
+    localStorage.setItem('recap-consent', 'denied');
+    window.dispatchEvent(new StorageEvent('storage', { key: 'recap-consent', newValue: 'denied' }));
+    expect(Recap.isRecording()).toBe(false);
+    (document.getElementById('b') as HTMLElement).click();
+    Recap.track('after_opt_out');
+    await Recap.flush();
+    expect(events().length).toBe(before);
+    expect(localStorage.getItem('recap-remote-anon')).toBeNull();
+  });
 });

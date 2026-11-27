@@ -9,7 +9,7 @@ import { initClickCapture } from './capture/clicks.js';
 import { initScrollCapture, refreshScrollCapture } from './capture/scroll.js';
 import { initNavigationCapture, emitCurrentPage } from './capture/navigation.js';
 import { initBuffer, flush, push, getBuffer, clearBuffer } from './storage/buffer.js';
-import { saveEvents, purgeOldSessions } from './storage/idb.js';
+import { saveEvents, purgeOldSessions, deleteLocalData } from './storage/idb.js';
 import { setEndpoint, sendBeaconBatch, hasEndpoint } from './storage/beacon.js';
 import { openPanel, closePanel, isPanelOpen } from './viz/panel.js';
 import { initTouchTrigger, type TouchTriggerOptions } from './capture/touch-trigger.js';
@@ -143,10 +143,7 @@ export const Recap = {
   optIn(): void {
     const was = _initialized && allowed();
     saveConsent('granted');
-    if (!_initialized) return;
-    connectIfAllowed();
-    // Start the session on the page they're on, since nothing was recorded until now.
-    if (!was) emitCurrentPage();
+    resumeAfterOptIn(was);
   },
 
   /**
@@ -155,10 +152,7 @@ export const Recap = {
    */
   optOut(): void {
     saveConsent('denied');
-    _remote?.discard();
-    _remote = null;
-    _early = [];
-    clearBuffer();
+    stopAfterOptOut();
   },
 
   /** Whether Recap is recording now: started, and not waiting for consent or opted out. */
@@ -229,6 +223,36 @@ export const Recap = {
   },
 };
 
+// --- Consent ---
+
+/** Stop recording and sending, and delete everything not yet sent and the copy kept in this browser. */
+function stopAfterOptOut(): void {
+  _remote?.discard();
+  _remote = null;
+  _early = [];
+  clearBuffer();
+  void deleteLocalData();
+}
+
+function resumeAfterOptIn(wasRecording: boolean): void {
+  if (!_initialized) return;
+  connectIfAllowed();
+  // Start the session on the page they're on, since nothing was recorded until now.
+  if (!wasRecording && allowed()) emitCurrentPage();
+}
+
+/**
+ * The choice is per browser, so another open tab of the same site follows it at once: an opt-out
+ * made in one tab stops this one too (and it doesn't recreate what that tab deleted).
+ */
+function onConsentChangedElsewhere(e: StorageEvent): void {
+  if (e.key !== KEY_CONSENT && e.key !== null) return; // null: storage cleared
+  const was = _initialized && allowed();
+  _consent = null; // read it again
+  if (consent() === 'denied') stopAfterOptOut();
+  else if (consent() === 'granted') resumeAfterOptIn(was);
+}
+
 /**
  * Settings read from the script tag's data-* attributes (script-tag build only). init() puts
  * anything it is given on top of these.
@@ -243,8 +267,8 @@ export function setScriptDefaults(config: RecapConfig): void {
 function startCapture(config: RecapConfig): void {
   const strip = config.stripQueryParams !== false; // default true
 
-  // Purge old sessions
-  void purgeOldSessions();
+  // Purge old sessions (not for a visitor who opted out: that would recreate the deleted database)
+  if (consent() !== 'denied') void purgeOldSessions();
 
   // Set up event buffer → IDB + optional beacon
   const stopBuffer = initBuffer(async (events: AnyEvent[]) => {
@@ -252,6 +276,10 @@ function startCapture(config: RecapConfig): void {
     if (hasEndpoint()) await sendBeaconBatch(events);
   });
   _destroyFns.push(stopBuffer);
+
+  // Follow an opt-in or opt-out made in another tab.
+  window.addEventListener('storage', onConsentChangedElsewhere);
+  _destroyFns.push(() => window.removeEventListener('storage', onConsentChangedElsewhere));
 
   // Start capture layers
   const stopClicks = initClickCapture(capture, strip);

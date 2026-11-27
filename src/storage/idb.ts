@@ -8,6 +8,8 @@ const STORE_NAME = 'events';
 const RETENTION_DAYS = 30;
 
 let _db: IDBDatabase | null = null;
+/** The open request in progress, so a delete can wait for it instead of racing it. */
+let _opening: Promise<IDBDatabase | null> | null = null;
 let _unavailable = false;
 // In-memory fallback when IndexedDB is unavailable
 const _memoryStore: AnyEvent[] = [];
@@ -29,7 +31,15 @@ function openDB(): Promise<IDBDatabase> {
       }
     };
 
-    req.onsuccess = (e) => resolve((e.target as IDBOpenDBRequest).result);
+    req.onsuccess = (e) => {
+      const db = (e.target as IDBOpenDBRequest).result;
+      // Another tab or the app is deleting or upgrading the database: let it, instead of blocking it.
+      db.onversionchange = () => {
+        db.close();
+        if (_db === db) _db = null;
+      };
+      resolve(db);
+    };
     req.onerror = (e) => reject((e.target as IDBOpenDBRequest).error);
   });
 }
@@ -37,14 +47,50 @@ function openDB(): Promise<IDBDatabase> {
 async function getDB(): Promise<IDBDatabase | null> {
   if (_unavailable) return null;
   if (_db) return _db;
-  try {
-    _db = await openDB();
-    return _db;
-  } catch {
-    _unavailable = true;
-    console.warn('[Recap] IndexedDB unavailable — events stored in memory only');
-    return null;
+  if (!_opening) {
+    _opening = openDB()
+      .then((db) => {
+        _db = db;
+        return db;
+      })
+      .catch(() => {
+        _unavailable = true;
+        console.warn('[Recap] IndexedDB unavailable — events stored in memory only');
+        return null;
+      })
+      .finally(() => {
+        _opening = null;
+      });
   }
+  return _opening;
+}
+
+/**
+ * Delete every event kept in this browser: closes Recap's own connection first (an open
+ * connection would block the delete) and removes the whole database. Used when the visitor opts out.
+ */
+export async function deleteLocalData(): Promise<void> {
+  _memoryStore.length = 0;
+  if (_opening) await _opening;
+  const db = _db;
+  _db = null;
+  try {
+    db?.close();
+  } catch {
+    // already closed
+  }
+  if (typeof indexedDB === 'undefined') return;
+  await new Promise<void>((resolve) => {
+    try {
+      const req = indexedDB.deleteDatabase(DB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      // Another tab still has it open: it closes on 'versionchange' and the delete then finishes.
+      req.onblocked = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
 }
 
 export async function saveEvents(events: AnyEvent[]): Promise<void> {
@@ -57,7 +103,14 @@ export async function saveEvents(events: AnyEvent[]): Promise<void> {
   }
 
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
+    let tx: IDBTransaction;
+    try {
+      tx = db.transaction(STORE_NAME, 'readwrite');
+    } catch {
+      // The connection was closed meanwhile (opted out, or another tab deleted the database).
+      resolve();
+      return;
+    }
     const store = tx.objectStore(STORE_NAME);
     events.forEach((e) => store.add(e));
     tx.oncomplete = () => resolve();

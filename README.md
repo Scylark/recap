@@ -106,7 +106,7 @@ Recap.init({
 
 // From your cookie banner or settings page:
 Recap.optIn();   // remembered in this browser
-Recap.optOut();  // stops at once and deletes anything not yet sent; remembered too
+Recap.optOut();  // stops at once, deletes anything not yet sent and the copy kept in this browser; remembered, and other open tabs follow it
 ```
 
 | Setting | What it does |
@@ -114,7 +114,7 @@ Recap.optOut();  // stops at once and deletes anything not yet sent; remembered 
 | `panel: false` | Turns off the researcher panel, its keyboard shortcut and the touch-hold. `shortcut: false` turns off only the shortcut. A later `init()` can change it |
 | `labels` | Where tap labels come from: `'text'` also uses the tapped element's visible text, `'attributes'` only `aria-label`, `aria-labelledby`, `title`, `alt` and `placeholder`, `'none'` only your own `data-ut-label`. Default: `'text'` while data stays in the browser, `'attributes'` once sessions go to a dashboard |
 | `screenName(path)` | Returns the name to count a page under. Used for page views, taps, scrolls and dashboard screens. Return nothing to keep the path |
-| `requireConsent` | Nothing is recorded or sent until `Recap.optIn()`. `Recap.optOut()` works either way, and both choices are kept in `localStorage` (`recap-consent`). `Recap.isRecording()` says where things stand |
+| `requireConsent` | Nothing is recorded or sent until `Recap.optIn()`. `Recap.optOut()` works either way, and both choices are kept in `localStorage` (`recap-consent`), so other open tabs of the site follow them at once. `Recap.isRecording()` says where things stand |
 | `recordings.maskText` | `true` replaces all text in replays with `*`, or pass a CSS selector for the parts to mask. `.ut-mask` text is always masked |
 
 Set `screenName` in your first `init()` call. With the script tag, add `data-auto-init="false"` and call

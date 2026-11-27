@@ -632,6 +632,7 @@ const DB_VERSION = 1;
 const STORE_NAME = "events";
 const RETENTION_DAYS = 30;
 let _db = null;
+let _opening = null;
 let _unavailable = false;
 const _memoryStore = [];
 function openDB() {
@@ -649,21 +650,54 @@ function openDB() {
         store2.createIndex("type", "type", { unique: false });
       }
     };
-    req.onsuccess = (e) => resolve(e.target.result);
+    req.onsuccess = (e) => {
+      const db = e.target.result;
+      db.onversionchange = () => {
+        db.close();
+        if (_db === db) _db = null;
+      };
+      resolve(db);
+    };
     req.onerror = (e) => reject(e.target.error);
   });
 }
 async function getDB() {
   if (_unavailable) return null;
   if (_db) return _db;
-  try {
-    _db = await openDB();
-    return _db;
-  } catch {
-    _unavailable = true;
-    console.warn("[Recap] IndexedDB unavailable — events stored in memory only");
-    return null;
+  if (!_opening) {
+    _opening = openDB().then((db) => {
+      _db = db;
+      return db;
+    }).catch(() => {
+      _unavailable = true;
+      console.warn("[Recap] IndexedDB unavailable — events stored in memory only");
+      return null;
+    }).finally(() => {
+      _opening = null;
+    });
   }
+  return _opening;
+}
+async function deleteLocalData() {
+  _memoryStore.length = 0;
+  if (_opening) await _opening;
+  const db = _db;
+  _db = null;
+  try {
+    db?.close();
+  } catch {
+  }
+  if (typeof indexedDB === "undefined") return;
+  await new Promise((resolve) => {
+    try {
+      const req = indexedDB.deleteDatabase(DB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      req.onblocked = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
 }
 async function saveEvents(events) {
   if (events.length === 0) return;
@@ -673,7 +707,13 @@ async function saveEvents(events) {
     return;
   }
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
+    let tx;
+    try {
+      tx = db.transaction(STORE_NAME, "readwrite");
+    } catch {
+      resolve();
+      return;
+    }
     const store2 = tx.objectStore(STORE_NAME);
     events.forEach((e) => store2.add(e));
     tx.oncomplete = () => resolve();
@@ -3566,9 +3606,7 @@ const Recap = {
   optIn() {
     const was = _initialized && allowed();
     saveConsent("granted");
-    if (!_initialized) return;
-    connectIfAllowed();
-    if (!was) emitCurrentPage();
+    resumeAfterOptIn(was);
   },
   /**
    * The visitor said no: stop recording and sending, and delete everything not yet sent.
@@ -3576,10 +3614,7 @@ const Recap = {
    */
   optOut() {
     saveConsent("denied");
-    _remote?.discard();
-    _remote = null;
-    _early = [];
-    clearBuffer();
+    stopAfterOptOut();
   },
   /** Whether Recap is recording now: started, and not waiting for consent or opted out. */
   isRecording() {
@@ -3639,17 +3674,38 @@ const Recap = {
     _initialized = false;
   }
 };
+function stopAfterOptOut() {
+  _remote?.discard();
+  _remote = null;
+  _early = [];
+  clearBuffer();
+  void deleteLocalData();
+}
+function resumeAfterOptIn(wasRecording) {
+  if (!_initialized) return;
+  connectIfAllowed();
+  if (!wasRecording && allowed()) emitCurrentPage();
+}
+function onConsentChangedElsewhere(e) {
+  if (e.key !== KEY_CONSENT && e.key !== null) return;
+  const was = _initialized && allowed();
+  _consent = null;
+  if (consent() === "denied") stopAfterOptOut();
+  else if (consent() === "granted") resumeAfterOptIn(was);
+}
 function setScriptDefaults(config) {
   _scriptDefaults = given(config);
 }
 function startCapture(config) {
   const strip = config.stripQueryParams !== false;
-  void purgeOldSessions();
+  if (consent() !== "denied") void purgeOldSessions();
   const stopBuffer = initBuffer(async (events) => {
     await saveEvents(events);
     if (hasEndpoint()) await sendBeaconBatch(events);
   });
   _destroyFns.push(stopBuffer);
+  window.addEventListener("storage", onConsentChangedElsewhere);
+  _destroyFns.push(() => window.removeEventListener("storage", onConsentChangedElsewhere));
   const stopClicks = initClickCapture(capture, strip);
   const stopScroll = initScrollCapture(capture, strip);
   const stopNav = initNavigationCapture((e) => {

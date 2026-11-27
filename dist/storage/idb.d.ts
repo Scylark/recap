@@ -1,4 +1,9 @@
 import type { AnyEvent } from '../types.js';
+/**
+ * Delete every event kept in this browser: closes Recap's own connection first (an open
+ * connection would block the delete) and removes the whole database. Used when the visitor opts out.
+ */
+export declare function deleteLocalData(): Promise<void>;
 export declare function saveEvents(events: AnyEvent[]): Promise<void>;
 export declare function getSessionEvents(sessionId: string): Promise<AnyEvent[]>;
 export declare function getAllSessions(): Promise<Array<{
