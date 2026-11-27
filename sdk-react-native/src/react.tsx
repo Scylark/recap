@@ -43,7 +43,7 @@ export interface RecapProviderProps {
 /** The shape of react-native-view-shot's captureRef, so we don't depend on the library. */
 export type CaptureRefLike = (
   view: unknown,
-  options: { format: 'jpg'; quality: number; width: number; result: 'base64' },
+  options: { format: 'jpg'; quality: number; width: number; height: number; result: 'base64' },
 ) => Promise<string>;
 
 const TAP_MAX_MOVE = 12; // points
@@ -94,16 +94,15 @@ export function RecapProvider({ config, children, navigationRef, device, capture
 
   useEffect(() => {
     if (!captureRef || (!config.screenshots && !config.recordings)) return;
-    recap.setScreenCapture(async (opts) =>
-      root.current
-        ? captureRef(root.current, {
-            format: 'jpg',
-            quality: opts?.quality ?? 0.6,
-            width: opts?.width ?? 360,
-            result: 'base64',
-          })
-        : null,
-    );
+    recap.setScreenCapture(async (opts) => {
+      if (!root.current) return null;
+      // view-shot only shrinks the picture when it gets both a width and a height; with a width alone
+      // it captures at full phone resolution, which is several times bigger and slower to take.
+      const width = opts?.width ?? 360;
+      const win = Dimensions.get('window');
+      const height = Math.round(width * (win.width > 0 ? win.height / win.width : 2.16));
+      return captureRef(root.current, { format: 'jpg', quality: opts?.quality ?? 0.6, width, height, result: 'base64' });
+    });
     return () => recap.setScreenCapture(null);
   }, [captureRef, config.screenshots, config.recordings]);
 

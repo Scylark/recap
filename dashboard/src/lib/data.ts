@@ -136,6 +136,12 @@ export interface Screenshot {
   height: number | null;
 }
 
+/**
+ * A real picture rather than a blank stand-in. Builds that can't capture the screen (a web build, a
+ * broken capture) can send a tiny image; showing it would hide the real pictures behind it.
+ */
+const usable = (image: string | null | undefined) => !!image && image.length > 400;
+
 /** The newest picture of a screen, if the app sends them (`screenshots` in the SDK config). */
 export async function screenshotFor(appId: string, screen: string): Promise<Screenshot | null> {
   const res = await db()
@@ -144,10 +150,10 @@ export async function screenshotFor(appId: string, screen: string): Promise<Scre
     .eq('app_id', appId)
     .eq('screen', screen)
     .order('captured_at', { ascending: false })
-    .limit(1);
+    .limit(10);
   // Older databases without the screenshots migration just show the plain grid.
   if (res.error) return null;
-  return ((res.data ?? [])[0] as Screenshot | undefined) ?? null;
+  return ((res.data ?? []) as Screenshot[]).find((r) => usable(r.image)) ?? null;
 }
 
 /** The newest picture of each of these screens, keyed by screen name. */
@@ -162,7 +168,7 @@ export async function screenshotsFor(appId: string, screens: string[]): Promise<
     .limit(200);
   if (res.error) return {};
   const out: Record<string, Screenshot> = {};
-  for (const r of (res.data ?? []) as (Screenshot & { screen: string })[]) if (!out[r.screen]) out[r.screen] = r;
+  for (const r of (res.data ?? []) as (Screenshot & { screen: string })[]) if (!out[r.screen] && usable(r.image)) out[r.screen] = r;
   return out;
 }
 
@@ -185,7 +191,7 @@ export async function getFrames(sessionId: string): Promise<Frame[]> {
       .range(from, from + 199);
     if (res.error) return out; // older databases without the recordings migration
     const rows = (res.data ?? []) as Frame[];
-    out.push(...rows);
+    out.push(...rows.filter((f) => f.image === null || usable(f.image)));
     if (rows.length < 200) break;
   }
   return out;

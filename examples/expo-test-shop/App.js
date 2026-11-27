@@ -397,10 +397,12 @@ function Confirmation({ navigation, route }) {
 
 // ---------- App ----------
 
-// Screen pictures come from react-native-view-shot on a real phone. In the browser build (used only by
-// the automated end-to-end test) view-shot can't capture, so we send a tiny placeholder picture instead.
+// Screen pictures come from react-native-view-shot on a real phone. view-shot can't capture in a
+// browser, so the web build takes no pictures at all, except in the automated end-to-end test, which
+// sends a tiny placeholder to check the upload path (the dashboard ignores pictures that small).
 const TEST_PICTURE = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-const capture = Platform.OS === 'web' ? async () => `data:image/png;base64,${TEST_PICTURE}` : captureRef;
+const capture =
+  Platform.OS !== 'web' ? captureRef : globalThis.__RECAP_E2E__ ? async () => `data:image/png;base64,${TEST_PICTURE}` : undefined;
 
 export default function App() {
   const [items, setItems] = useState([]);
