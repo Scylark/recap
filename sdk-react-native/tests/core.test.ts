@@ -340,6 +340,34 @@ describe('RecapCore', () => {
     expect(transport.batches[0]!.session.id).toBe(frames[0]!.sessionId);
   });
 
+  it('takes quick extra frames after taps and scrolls, but not too often', async () => {
+    const timers: { fn: () => void; ms: number }[] = [];
+    const d = { ...deps, setTimeout: (fn: () => void, ms: number) => void timers.push({ fn, ms }) };
+    const transport = { ...fakeTransport(), sendFrames: async () => undefined };
+    const r = new RecapCore(d);
+    await r.init({ appId: 'test', transport, recordings: true }, device);
+    r.screen('Home');
+    expect(timers.map((x) => x.ms)).toEqual([120, 450]); // a new screen gets a burst too
+    clock += 1000;
+    const before = timers.length;
+    r.tap({ x: 10, y: 10 });
+    expect(timers.slice(before).map((x) => x.ms)).toEqual([120, 450]);
+    r.scroll(10); // within 300ms of the tap: no second burst
+    expect(timers.length).toBe(before + 2);
+    clock += 400;
+    r.scroll(20);
+    expect(timers.length).toBe(before + 4);
+
+    const plain = new RecapCore(d);
+    await plain.init({ appId: 'test', transport }, device);
+    const n = timers.length;
+    plain.tap({ x: 1, y: 1 });
+    plain.scroll(50);
+    expect(timers.length).toBe(n); // recordings off: no extra frames
+    await r.shutdown();
+    await plain.shutdown();
+  });
+
   it('records no frames unless switched on, and respects maxFrames', async () => {
     const got: unknown[] = [];
     const transport = { ...fakeTransport(), sendFrames: async (f: unknown) => void got.push(f) };

@@ -18,7 +18,7 @@ the app owner is responsible for their own declarations and privacy policy.
 | Session id | random UUID | New per session |
 | Install id | random UUID | Made by the SDK on first launch and kept in the app's own storage, so analytics can count returning people (retention). Not a hardware or advertising id; it goes away when the app is deleted, and `recap.optOut()` replaces it |
 | User id (optional) | `usr_8812` | Only if the developer calls `setUserId()` |
-| Screen recordings (optional) | small JPEG about once a second | Only if the developer turns on `recordings`. Pauses while the keyboard is open, on excluded screens and while `<RecapPrivate>` content is shown. Deleted with the session |
+| Screen recordings (optional) | small JPEG about once a second, with a couple of extra ones just after taps and scrolls | Only if the developer turns on `recordings`. Pauses while the keyboard is open, on excluded screens and while `<RecapPrivate>` content is shown. Deleted with the session |
 | Screen pictures (optional) | small JPEG of each screen | Only if the developer turns on `screenshots`. One per screen per app version. We recommend `screenshots: __DEV__`, so pictures only come from the developer's own test phone |
 
 Not collected: typed text as data, screen recordings (unless `recordings` is turned on), IP-based location (Supabase may log request

@@ -17,7 +17,7 @@ import type {
   Transport,
 } from './types';
 
-export const SDK_VERSION = '0.3.0';
+export const SDK_VERSION = '0.3.1';
 
 const KEY_QUEUE = 'recap:queue';
 const KEY_CONSENT = 'recap:consent';
@@ -97,6 +97,7 @@ export class RecapCore {
   private recFrames = 0;
   private recBusy = false;
   private recLast: string | null | undefined = undefined;
+  private recNudgedAt = -Infinity;
   private recBuffer: { sessionId: string; t: number; image: string | null }[] = [];
   private recSending = false;
   private privacyHolds = 0;
@@ -246,6 +247,7 @@ export class RecapCore {
     const from = this.currentScreen;
     this.currentScreen = name;
     this.record('screen', { from, ...props });
+    this.nudgeRecording();
     this.maybeScreenshot(name);
   }
 
@@ -297,6 +299,18 @@ export class RecapCore {
     if (this.privacyHolds > 0) return 'private';
     if (opt?.exclude && this.currentScreen && opt.exclude.includes(this.currentScreen)) return 'excluded';
     return null;
+  }
+
+  /**
+   * Something is moving on screen (a tap, a scroll, a new screen), so take a couple of quick extra
+   * frames. Without these a scroll or a tap's result can fall between the once-a-second pictures.
+   */
+  private nudgeRecording(): void {
+    if (!this.recOptions || !this.recSampled) return;
+    const now = this.now();
+    if (now - this.recNudgedAt < 300) return;
+    this.recNudgedAt = now;
+    for (const ms of [120, 450]) this.setTimeoutFn(() => void this.recordFrame(), ms);
   }
 
   /** Takes one frame. Runs on a timer; exposed for tests. */
@@ -409,6 +423,7 @@ export class RecapCore {
       label = this.pendingLabel.label;
     }
     this.pendingLabel = null;
+    this.nudgeRecording();
     this.record('tap', {
       x: Math.round(input.x),
       y: Math.round(input.y),
@@ -439,6 +454,7 @@ export class RecapCore {
 
   /** Report scroll depth (0 to 100) for the current screen. Only milestones and new maximums are kept. */
   scroll(depth: number, screen: string | null = this.currentScreen): void {
+    this.nudgeRecording();
     const key = screen ?? '';
     const d = Math.max(0, Math.min(100, Math.round(depth)));
     const prev = this.scrollMax.get(key) ?? 0;

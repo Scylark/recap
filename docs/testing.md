@@ -2,7 +2,7 @@
 
 | What | How | Where |
 | --- | --- | --- |
-| SDK logic: sessions, consent, sampling, offline queue, batching, tap labels, start-up buffering, Supabase key headers, install id, screen pictures (once per screen and version, exclusions, skipped if the person moved on), recordings (unchanged frames skipped, pauses for keyboard, private views and excluded screens, frame cap) | 19 unit tests | `sdk-react-native/tests/` |
+| SDK logic: sessions, consent, sampling, offline queue, batching, tap labels, start-up buffering, Supabase key headers, install id, screen pictures (once per screen and version, exclusions, skipped if the person moved on), recordings (unchanged frames skipped, pauses for keyboard, private views and excluded screens, frame cap, quick extra frames after taps and scrolls) | 20 unit tests | `sdk-react-native/tests/` |
 | Database: ingest, counters, app isolation, anon can't read, only team members can read, viewers can't delete, admin tools, retention | SQL checks on a real Postgres | `supabase/tests/security.sql` |
 | Analytics and screen pictures: event names, funnel, retention, properties, pictures replace older ones, non-images refused, anon and strangers see nothing | SQL checks on a real Postgres | `supabase/tests/analytics-and-screens.sql` |
 | Recordings: frames stored only for a known session of the same app, non-images refused, anon and strangers can't read, viewers can't delete, frames deleted with their session | SQL checks on a real Postgres | `supabase/tests/recordings.sql` |

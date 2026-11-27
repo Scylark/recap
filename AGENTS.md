@@ -180,8 +180,8 @@ config={{ ...config, recordings: { sampleRate: 0.1, exclude: ['Account'] } }}
 <RecapPrivate><CheckoutForm /></RecapPrivate>
 ```
 
-The SDK takes a small JPEG (about 10 to 25 KB) roughly once a second while the app is open, skips frames
-where nothing changed, and stops after 10 minutes per session. It pauses on its own while the keyboard is
+The SDK takes a small JPEG (about 10 to 25 KB) roughly once a second while the app is open (plus two quick extra ones just after a tap, a scroll or a new screen, so the replay shows what moved), skips frames
+where nothing changed, and stops after 600 pictures per session (`maxFrames`), which is about ten minutes of use. It pauses on its own while the keyboard is
 open, on `exclude` screens and while any `<RecapPrivate>` is mounted; those moments show as "Hidden for
 privacy" in the replay. Before turning it on in production:
 - **Ask** the owner, and find every screen that shows names, addresses, payment details, messages or

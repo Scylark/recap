@@ -112,7 +112,18 @@ export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.1
   const hidden = recorded && frame?.image === null;
   const picture = recorded ? (frame?.image ? { image: frame.image, width: null, height: null } : pictures[screen]) : pictures[screen];
   const width = 280;
-  const height = Math.round(width * (picture?.width && picture.height ? picture.height / picture.width : aspect));
+  // One steady phone size for the whole replay, so the view never jumps between pictures.
+  const height = useMemo(() => {
+    const sized = Object.values(pictures).find((p) => p.width && p.height);
+    return Math.round(width * (sized ? sized.height! / sized.width! : aspect));
+  }, [pictures, aspect]);
+
+  // Fade from the previous picture to the next rather than cutting.
+  const src = picture?.image;
+  const [layers, setLayers] = useState<{ prev?: string; cur?: string }>({ cur: src });
+  useEffect(() => {
+    setLayers((l) => (l.cur === src ? l : { prev: l.cur, cur: src }));
+  }, [src]);
 
   const toggle = () => {
     if (!playing && t >= end) setT(0);
@@ -131,7 +142,10 @@ export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.1
       <div className="replay-stage">
         <div className="phone replay-phone" style={{ width, height }}>
           {picture ? (
-            <img src={picture.image} alt={`${screen} screen`} className="phone-bg replay-bg" />
+            <>
+              {layers.prev && layers.prev !== src && <img src={layers.prev} alt="" aria-hidden className="phone-bg replay-bg" />}
+              <img key={src} src={src} alt={`${screen} screen`} className="phone-bg replay-bg replay-fade" />
+            </>
           ) : (
             <div className="phone-grid replay-missing">
               <span>{screen}</span>
