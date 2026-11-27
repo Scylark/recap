@@ -1,0 +1,9 @@
+# Only the dashboard (and the shared src/ it imports) is deployed to Vercel.
+.claude
+**/node_modules
+examples
+sdk-react-native
+docs
+supabase
+dashboard/dist
+dashboard/dist-demo
