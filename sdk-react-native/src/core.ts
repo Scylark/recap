@@ -29,6 +29,8 @@ const LABEL_WINDOW_MS = 600;
 const SCROLL_MILESTONES = [25, 50, 75, 100];
 /** Recording keeps following a scroll until it has been still for this long. */
 const SCROLL_SETTLE_MS = 400;
+/** How long a new screen takes to slide in; no frames are taken until it has. */
+const SCREEN_SETTLE_MS = 450;
 
 type ConsentState = 'granted' | 'denied' | 'unknown';
 
@@ -101,6 +103,8 @@ export class RecapCore {
   private recLast: string | null | undefined = undefined;
   private recNudgedAt = -Infinity;
   private recScrollAt = -Infinity;
+  /** No frames until this time: a new screen is still sliding in. */
+  private recSettleUntil = -Infinity;
   private recFollowing = false;
   private recBuffer: { sessionId: string; t: number; image: string | null }[] = [];
   private recSending = false;
@@ -251,7 +255,7 @@ export class RecapCore {
     const from = this.currentScreen;
     this.currentScreen = name;
     this.record('screen', { from, ...props });
-    this.nudgeRecording();
+    this.settleAfterScreenChange();
     this.maybeScreenshot(name);
   }
 
@@ -341,12 +345,25 @@ export class RecapCore {
     this.setTimeoutFn(step, 0);
   }
 
+  /**
+   * A new screen slides in over about a third of a second. Frames taken during that show half of
+   * each screen on top of each other, so hold off until it has landed, then take two frames.
+   */
+  private settleAfterScreenChange(): void {
+    if (!this.recOptions || !this.recSampled) return;
+    const now = this.now();
+    this.recSettleUntil = now + SCREEN_SETTLE_MS;
+    this.recNudgedAt = now; // a tap that opened this screen doesn't get its own burst
+    for (const ms of [SCREEN_SETTLE_MS + 20, SCREEN_SETTLE_MS + 350]) this.setTimeoutFn(() => void this.recordFrame(), ms);
+  }
+
   /** Takes one frame. Runs on a timer; exposed for tests. */
   async recordFrame(): Promise<void> {
     const opt = this.recOptions;
     if (!opt || !this.capture || !this.transport?.sendFrames || !this.session) return;
     if (!this.isRecording() || !this.recSampled || this.backgroundedAt !== null || this.recBusy) return;
     if (this.recFrames >= (opt.maxFrames ?? 600)) return;
+    if (this.now() < this.recSettleUntil) return;
     const sessionId = this.session.id;
     const t = Math.max(0, this.now() - this.sessionStartMs);
     if (this.recordingPausedFor()) {

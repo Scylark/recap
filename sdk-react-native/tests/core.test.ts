@@ -347,7 +347,7 @@ describe('RecapCore', () => {
     const r = new RecapCore(d);
     await r.init({ appId: 'test', transport, recordings: true }, device);
     r.screen('Home');
-    expect(timers.map((x) => x.ms)).toEqual([120, 450]); // a new screen gets a burst too
+    expect(timers.map((x) => x.ms)).toEqual([470, 800]); // a new screen: two frames once it has slid in
     clock += 1000;
     const before = timers.length;
     r.tap({ x: 10, y: 10 });
@@ -380,6 +380,7 @@ describe('RecapCore', () => {
     const r = new RecapCore(d);
     await r.init({ appId: 'test', transport, recordings: true }, device);
     r.screen('Home');
+    clock += 1000; // the screen has finished sliding in
     let n = 0;
     r.setScreenCapture(async () => `P${n++}`); // every picture differs, like a moving page
     timers.length = 0;
@@ -411,6 +412,30 @@ describe('RecapCore', () => {
     expect(ts).toEqual([...ts].sort((a, b) => a - b));
     // Frames during the scroll are about 150 ms apart, not one a second.
     expect(ts[2]! - ts[1]!).toBeLessThanOrEqual(150);
+  });
+
+  it('takes no frames while a new screen is sliding in', async () => {
+    const timers: { fn: () => void; ms: number }[] = [];
+    const d = { ...deps, setTimeout: (fn: () => void, ms: number) => void timers.push({ fn, ms }) };
+    const sent: { t: number }[] = [];
+    const transport = {
+      ...fakeTransport(),
+      sendFrames: async (f: { frames: { t: number }[] }) => void sent.push(...f.frames),
+    };
+    const r = new RecapCore(d);
+    await r.init({ appId: 'test', transport, recordings: true }, device);
+    let n = 0;
+    r.setScreenCapture(async () => `P${n++}`);
+    r.screen('Home');
+    const start = clock;
+    clock = start + 200;
+    await r.recordFrame(); // the once-a-second timer fires mid-slide: skipped
+    expect(n).toBe(0);
+    clock = start + 470;
+    await r.recordFrame(); // landed
+    expect(n).toBe(1);
+    await r.shutdown();
+    expect(sent.map((f) => f.t)).toEqual([470]);
   });
 
   it('records no frames unless switched on, and respects maxFrames', async () => {
