@@ -187,7 +187,17 @@
 
   <script type="module">
     import { Recap } from 'recap-ux';
-    Recap.init({ showPanel: false, sessionName: 'demo-session' });
+    // With the test shop's .env present, sessions also go to your Supabase and show in the
+    // dashboard as app "demo-web", platform "web". Without it, everything stays in this browser.
+    const supabaseUrl = import.meta.env?.EXPO_PUBLIC_RECAP_SUPABASE_URL;
+    const supabaseKey = import.meta.env?.EXPO_PUBLIC_RECAP_SUPABASE_ANON_KEY;
+    Recap.init({
+      showPanel: false,
+      sessionName: 'demo-session',
+      ...(supabaseUrl && supabaseKey
+        ? { supabase: { url: supabaseUrl, anonKey: supabaseKey }, appId: 'demo-web', appVersion: '1.0.0' }
+        : {}),
+    });
     document.getElementById('open-recap').addEventListener('click', () => Recap.openPanel());
 
     // ── Page content ───────────────────────────────────────────────────────────

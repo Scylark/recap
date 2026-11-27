@@ -10,6 +10,10 @@ export default defineConfig(({ command }) => {
       // all unknown routes. This means Vite's full-page reload after a file
       // change won't 404 when the browser is on a pushState URL like /reports.
       server: { open: '/' },
+      // The demo page reuses the Expo test shop's .env, so the same Supabase keys send web
+      // sessions to the same dashboard. Without that file the demo stays offline-only.
+      envDir: resolve(__dirname, 'examples/expo-test-shop'),
+      envPrefix: ['VITE_', 'EXPO_PUBLIC_'],
       resolve: {
         alias: {
           // Map the CDN script reference to local source so changes hot-reload

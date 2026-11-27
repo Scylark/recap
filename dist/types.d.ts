@@ -51,6 +51,19 @@ export interface RecapConfig {
     sessionName?: string;
     showPanel?: boolean;
     endpoint?: string;
+    /**
+     * Also send sessions to the Recap tables in your own Supabase project, so they show in the
+     * Recap dashboard next to iOS and Android sessions. Use the public anon or publishable key only.
+     * Script tag: data-supabase-url and data-supabase-key.
+     */
+    supabase?: {
+        url: string;
+        anonKey: string;
+    };
+    /** Name for this site in the dashboard, e.g. "my-shop-web". Default: the page's hostname. Script tag: data-app-id. */
+    appId?: string;
+    /** Your site's version, shown in the dashboard. Script tag: data-app-version. */
+    appVersion?: string;
     shortcut?: string;
     stripQueryParams?: boolean;
     /** Enable the touch-hold gesture that opens/closes the panel on touch devices. Default: true. */

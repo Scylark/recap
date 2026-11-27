@@ -101,6 +101,10 @@ All options are `data-*` attributes on the script tag:
 | `data-session-name` | auto | Label for this session, e.g. `"participant-04"` |
 | `data-show-panel` | `"false"` | Show researcher panel on load |
 | `data-shortcut` | `"alt+shift+y"` | Keyboard shortcut for the researcher panel. Format: modifiers and one key joined by `+`, e.g. `"ctrl+shift+y"` |
+| `data-supabase-url` | none | Your Supabase project URL. With `data-supabase-key`, sessions also go to the Recap dashboard (see [Web sessions in the dashboard](#web-sessions-in-the-dashboard)) |
+| `data-supabase-key` | none | Your Supabase **public anon or publishable key**. Never the service role key |
+| `data-app-id` | page hostname | Name for this site in the dashboard, e.g. `my-shop-web` |
+| `data-app-version` | none | Your site's version, shown in the dashboard |
 | `data-endpoint` | none | URL to POST captured events to in batches (see [Advanced](#advanced)) |
 | `data-strip-query-params` | `"true"` | Remove query strings from recorded URLs. Set to `"false"` to keep them |
 | `data-touch-trigger` | `"true"` | Hold 3 fingers on screen to open/close the panel on touch devices |
@@ -139,6 +143,19 @@ To exclude sensitive elements from tracking:
 ### Sending events to your own server
 
 Set `data-endpoint` on the script tag to a URL you control. Recap then posts captured events to that URL in batches, using `navigator.sendBeacon` with a `fetch` fallback. Nothing is sent unless this option is set, and the endpoint receives the same data the panel shows.
+
+### Web sessions in the dashboard
+
+If you use the Recap dashboard for a mobile app (see [Mobile apps](#mobile-apps-beta)), the web library can send to the same Supabase project. Run the same migrations, then:
+
+```html
+<script src="https://unpkg.com/recap-ux/dist/recap.min.js"
+  data-supabase-url="https://your-project.supabase.co"
+  data-supabase-key="your-public-anon-key"
+  data-app-id="my-shop-web"></script>
+```
+
+Pages, clicks, scroll depth and tab switches appear in the dashboard with platform `web`. Typed text is never captured. The panel and local storage keep working as before, so nothing changes for people who don't use Supabase. Replays and heatmap pictures for web are not built yet.
 
 ## Development
 

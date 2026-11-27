@@ -733,6 +733,131 @@ async function sendBeaconBatch(events) {
 function hasEndpoint() {
   return _endpoint !== null;
 }
+const WEB_SDK_VERSION = "web-1.2.0";
+const START_KEY = "recap-session-start";
+let _target = null;
+function setSupabase(target) {
+  _target = { ...target, url: target.url.replace(/\/+$/, "") };
+  sessionStartMs(typeof performance !== "undefined" ? Math.round(performance.timeOrigin) : Date.now());
+}
+function hasSupabase() {
+  return _target !== null;
+}
+function sessionStartMs(now = Date.now()) {
+  try {
+    const stored = Number(sessionStorage.getItem(START_KEY));
+    if (stored > 0) return stored;
+    sessionStorage.setItem(START_KEY, String(now));
+  } catch {
+  }
+  return now;
+}
+function describeBrowser(ua) {
+  const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Browser";
+  const os = /iPhone|iPad|iPod/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Mac OS X/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : null;
+  return os ? `${browser} on ${os}` : browser;
+}
+const clamp01 = (n) => n < 0 ? 0 : n > 1 ? 1 : Math.round(n * 1e3) / 1e3;
+function toIngestEvents(events, timeOrigin, startMs) {
+  const out = [];
+  for (const e of events) {
+    const wall = Math.round(timeOrigin + e.timestamp);
+    const base = { t: Math.max(0, wall - startMs), at: new Date(wall).toISOString(), screen: e.url || null };
+    const w = e.viewport.width || 1;
+    const h = e.viewport.height || 1;
+    switch (e.type) {
+      case "navigation":
+        out.push({ ...base, type: "screen", screen: e.to || e.url || null, data: { from: e.from || null, method: e.method } });
+        break;
+      case "click":
+        out.push({
+          ...base,
+          type: "tap",
+          data: {
+            x: Math.round(e.clientX),
+            y: Math.round(e.clientY),
+            nx: clamp01(e.clientX / w),
+            ny: clamp01(e.clientY / h),
+            pageX: Math.round(e.pageX),
+            pageY: Math.round(e.pageY),
+            label: e.label,
+            selector: e.selector,
+            tag: e.tagName
+          }
+        });
+        break;
+      case "scroll":
+        out.push({ ...base, type: "scroll", data: { depth: e.depth, maxDepth: e.maxDepth } });
+        break;
+      case "visibility":
+        out.push({ ...base, type: "app_state", data: { state: e.state === "hidden" ? "background" : "active" } });
+        break;
+    }
+  }
+  return out;
+}
+function buildBatch(events, ctx) {
+  const vw = typeof window !== "undefined" ? window.innerWidth : 0;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 0;
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  return {
+    appId: ctx.appId,
+    sdkVersion: WEB_SDK_VERSION,
+    session: {
+      id: ctx.sessionId,
+      startedAt: new Date(ctx.startMs).toISOString(),
+      userId: null,
+      anonymousId: null,
+      device: {
+        platform: "web",
+        osVersion: null,
+        model: describeBrowser(ua),
+        appVersion: ctx.appVersion ?? null,
+        screenWidth: vw,
+        screenHeight: vh,
+        locale: typeof navigator !== "undefined" ? navigator.language ?? null : null
+      }
+    },
+    events: toIngestEvents(events, ctx.timeOrigin, ctx.startMs)
+  };
+}
+let _pending = [];
+async function sendToSupabase(events, sessionId) {
+  if (!_target) return;
+  const all = _pending.concat(events);
+  _pending = [];
+  if (all.length === 0) return;
+  for (let i = 0; i < all.length; i += 200) {
+    try {
+      await postBatch(all.slice(i, i + 200), sessionId);
+    } catch (err) {
+      _pending = all.slice(i).slice(-1e3);
+      console.warn(String(err));
+      return;
+    }
+  }
+}
+async function postBatch(events, sessionId) {
+  const t = _target;
+  const batch = buildBatch(events, {
+    appId: t.appId,
+    appVersion: t.appVersion,
+    sessionId,
+    startMs: sessionStartMs(),
+    timeOrigin: performance.timeOrigin
+  });
+  if (batch.events.length === 0) return;
+  const headers = { "Content-Type": "application/json", apikey: t.anonKey };
+  if (t.anonKey.startsWith("eyJ")) headers["Authorization"] = `Bearer ${t.anonKey}`;
+  const body = JSON.stringify({ payload: batch });
+  const res = await fetch(`${t.url}/rest/v1/rpc/recap_ingest`, {
+    method: "POST",
+    headers,
+    body,
+    keepalive: body.length < 6e4
+  });
+  if (!res.ok) throw new Error(`[Recap] Supabase upload failed with HTTP ${res.status}`);
+}
 const PROMPT_TEMPLATE = `You are a UX researcher analysing a usability test session for a web application prototype.
 
 Below is a structured session summary in JSON format. It contains:
@@ -1677,11 +1802,11 @@ const BRIEF_VISIT_S = 2;
 function generateTimeline(events, isCurrentSession = false) {
   if (events.length === 0) return [];
   const sorted = events.slice().sort((a, b) => a.timestamp - b.timestamp);
-  const sessionStartMs = sorted[0].timestamp;
+  const sessionStartMs2 = sorted[0].timestamp;
   const lastEventMs = sorted[sorted.length - 1].timestamp;
   const navEvents = sorted.filter((e) => e.type === "navigation");
   if (navEvents.length === 0) {
-    const duration = isCurrentSession ? null : (lastEventMs - sessionStartMs) / 1e3;
+    const duration = isCurrentSession ? null : (lastEventMs - sessionStartMs2) / 1e3;
     const tags = [];
     if (!isCurrentSession) tags.push("end of session");
     return [{
@@ -1698,7 +1823,7 @@ function generateTimeline(events, isCurrentSession = false) {
   if (firstNav.method === "pageload") {
     pages.push({ path: firstNav.to, arrivalMs: firstNav.timestamp });
   } else {
-    pages.push({ path: firstNav.from, arrivalMs: sessionStartMs });
+    pages.push({ path: firstNav.from, arrivalMs: sessionStartMs2 });
     pages.push({ path: firstNav.to, arrivalMs: firstNav.timestamp });
   }
   for (let i = 1; i < navEvents.length; i++) {
@@ -1728,7 +1853,7 @@ function generateTimeline(events, isCurrentSession = false) {
     if (isLast && !isCurrentSession) tags.push("end of session");
     return {
       pagePath: page.path,
-      arrivalTime: (page.arrivalMs - sessionStartMs) / 1e3,
+      arrivalTime: (page.arrivalMs - sessionStartMs2) / 1e3,
       duration,
       visitNumber,
       isRevisit,
@@ -1736,9 +1861,9 @@ function generateTimeline(events, isCurrentSession = false) {
     };
   });
 }
-function visitWindowMs(visit, sessionStartMs, isLastVisit) {
-  const visitStartMs = sessionStartMs + visit.arrivalTime * 1e3;
-  const visitEndMs = isLastVisit || visit.duration === null ? null : sessionStartMs + (visit.arrivalTime + visit.duration) * 1e3;
+function visitWindowMs(visit, sessionStartMs2, isLastVisit) {
+  const visitStartMs = sessionStartMs2 + visit.arrivalTime * 1e3;
+  const visitEndMs = isLastVisit || visit.duration === null ? null : sessionStartMs2 + (visit.arrivalTime + visit.duration) * 1e3;
   return { visitStartMs, visitEndMs };
 }
 function eventsInVisit(events, visit) {
@@ -2787,8 +2912,8 @@ function bindEvents(root) {
       if (!visit) return;
       const totalVisits = timeline.filter((v) => v.pagePath === visit.pagePath).length;
       const label = totalVisits > 1 ? `visit ${visit.visitNumber} of ${totalVisits}` : "";
-      const sessionStartMs = _allEvents.reduce((min, e) => Math.min(min, e.timestamp), Infinity);
-      const range = visitWindowMs(visit, sessionStartMs, visitIndex === timeline.length - 1);
+      const sessionStartMs2 = _allEvents.reduce((min, e) => Math.min(min, e.timestamp), Infinity);
+      const range = visitWindowMs(visit, sessionStartMs2, visitIndex === timeline.length - 1);
       _heatmapFilter = { pagePath: visit.pagePath, ...range, label };
       if (location.pathname !== visit.pagePath) {
         (_origPushState ?? history.pushState).call(history, null, "", visit.pagePath);
@@ -3002,11 +3127,20 @@ const Recap = {
     _initialized = true;
     if (config.sessionName) setSessionName(config.sessionName);
     if (config.endpoint) setEndpoint(config.endpoint);
+    if (config.supabase?.url && config.supabase.anonKey) {
+      setSupabase({
+        url: config.supabase.url,
+        anonKey: config.supabase.anonKey,
+        appId: config.appId || (typeof location !== "undefined" ? location.hostname : "") || "web",
+        appVersion: config.appVersion
+      });
+    }
     const strip = config.stripQueryParams !== false;
     void purgeOldSessions();
     const stopBuffer = initBuffer(async (events) => {
       await saveEvents(events);
       if (hasEndpoint()) await sendBeaconBatch(events);
+      if (hasSupabase()) await sendToSupabase(events, getSessionId());
     });
     _destroyFns.push(stopBuffer);
     const stopClicks = initClickCapture((e) => push(e), strip);
@@ -3125,6 +3259,11 @@ function readScriptConfig() {
   if (el.dataset["sessionName"]) config.sessionName = el.dataset["sessionName"];
   if (el.dataset["showPanel"] === "true") config.showPanel = true;
   if (el.dataset["endpoint"]) config.endpoint = el.dataset["endpoint"];
+  if (el.dataset["supabaseUrl"] && el.dataset["supabaseKey"]) {
+    config.supabase = { url: el.dataset["supabaseUrl"], anonKey: el.dataset["supabaseKey"] };
+  }
+  if (el.dataset["appId"]) config.appId = el.dataset["appId"];
+  if (el.dataset["appVersion"]) config.appVersion = el.dataset["appVersion"];
   if (el.dataset["shortcut"]) config.shortcut = el.dataset["shortcut"];
   if (el.dataset["stripQueryParams"] === "false") config.stripQueryParams = false;
   if (el.dataset["touchTrigger"] === "false") config.touchTrigger = false;

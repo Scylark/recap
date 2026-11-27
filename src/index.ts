@@ -9,6 +9,7 @@ import { initNavigationCapture } from './capture/navigation.js';
 import { initBuffer, flush, push, getBuffer } from './storage/buffer.js';
 import { saveEvents, purgeOldSessions } from './storage/idb.js';
 import { setEndpoint, sendBeaconBatch, hasEndpoint } from './storage/beacon.js';
+import { setSupabase, hasSupabase, sendToSupabase } from './storage/supabase.js';
 import { openPanel, closePanel, isPanelOpen } from './viz/panel.js';
 import { initTouchTrigger, type TouchTriggerOptions } from './capture/touch-trigger.js';
 import { summarize } from './analysis/summarize.js';
@@ -33,6 +34,14 @@ export const Recap = {
     // Apply config
     if (config.sessionName) setSessionName(config.sessionName);
     if (config.endpoint) setEndpoint(config.endpoint);
+    if (config.supabase?.url && config.supabase.anonKey) {
+      setSupabase({
+        url: config.supabase.url,
+        anonKey: config.supabase.anonKey,
+        appId: config.appId || (typeof location !== 'undefined' ? location.hostname : '') || 'web',
+        appVersion: config.appVersion,
+      });
+    }
 
     const strip = config.stripQueryParams !== false; // default true
 
@@ -43,6 +52,7 @@ export const Recap = {
     const stopBuffer = initBuffer(async (events: AnyEvent[]) => {
       await saveEvents(events);
       if (hasEndpoint()) await sendBeaconBatch(events);
+      if (hasSupabase()) await sendToSupabase(events, getSessionId());
     });
     _destroyFns.push(stopBuffer);
 
@@ -212,6 +222,11 @@ function readScriptConfig(): RecapConfig {
   if (el.dataset['sessionName']) config.sessionName = el.dataset['sessionName'];
   if (el.dataset['showPanel'] === 'true') config.showPanel = true;
   if (el.dataset['endpoint']) config.endpoint = el.dataset['endpoint'];
+  if (el.dataset['supabaseUrl'] && el.dataset['supabaseKey']) {
+    config.supabase = { url: el.dataset['supabaseUrl'], anonKey: el.dataset['supabaseKey'] };
+  }
+  if (el.dataset['appId']) config.appId = el.dataset['appId'];
+  if (el.dataset['appVersion']) config.appVersion = el.dataset['appVersion'];
   if (el.dataset['shortcut']) config.shortcut = el.dataset['shortcut'];
   if (el.dataset['stripQueryParams'] === 'false') config.stripQueryParams = false;
   if (el.dataset['touchTrigger'] === 'false') config.touchTrigger = false;
