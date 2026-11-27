@@ -103,7 +103,6 @@ export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.1
   const current = [...past].reverse().find((e) => e.type !== 'screen') ?? past[past.length - 1];
   const recorded = frames.length > 0;
   let frame: Frame | undefined;
-  let blend: { image: string; amount: number } | null = null;
   if (recorded) {
     // Latest frame at or before t (frames are sorted); before the first one, show the first.
     let lo = 0;
@@ -114,12 +113,6 @@ export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.1
       else hi = mid - 1;
     }
     frame = frames[lo];
-    // Between two close frames (a scroll), blend towards the next one so motion looks continuous
-    // rather than stepping from picture to picture.
-    const after = frames[lo + 1];
-    if (frame && after && frame.image && after.image && frame.t_ms <= t && after.t_ms - frame.t_ms <= 700) {
-      blend = { image: after.image, amount: Math.min(1, (t - frame.t_ms) / (after.t_ms - frame.t_ms)) };
-    }
   }
   const hidden = recorded && frame?.image === null;
   const picture = recorded ? (frame?.image ? { image: frame.image, width: null, height: null } : pictures[screen]) : pictures[screen];
@@ -162,12 +155,11 @@ export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.1
         <div className="phone replay-phone" style={{ width, height }}>
           {picture ? (
             <>
-              {/* Screen pictures fade from one screen to the next; recordings blend frame to frame instead. */}
+              {/* Screen pictures fade from one screen to the next; recording frames cut, so they stay crisp. */}
               {!recorded && layers.prev && layers.prev !== src && (
                 <img src={layers.prev} alt="" aria-hidden className="phone-bg replay-bg" />
               )}
               <img key={recorded ? 'frame' : src} src={src} alt={`${screen} screen`} className={`phone-bg replay-bg${recorded ? '' : ' replay-fade'}`} />
-              {blend && <img src={blend.image} alt="" aria-hidden className="phone-bg replay-bg" style={{ opacity: blend.amount }} />}
             </>
           ) : (
             <div className="phone-grid replay-missing">
