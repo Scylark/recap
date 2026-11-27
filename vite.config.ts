@@ -90,7 +90,8 @@ export default defineConfig(({ command, mode }) => {
             react: 'React',
             'react-dom': 'ReactDOM',
           },
-          exports: 'named',
+          // The script tag's window.Recap is browser.ts's default export: the API object itself.
+          exports: scriptTag ? 'default' : 'named',
         },
       },
       minify: 'terser',
