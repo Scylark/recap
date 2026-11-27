@@ -280,7 +280,7 @@ network access. Upload errors are logged when `debug` is on.
 If the developer also has a website or web app, it can report to the same database and dashboard.
 1. Install `recap-ux` (and `rrweb@2.2.2` if they want page replays) and call `Recap.init({ appId, supabase: { url, anonKey }, recordings: { record } })`
    once at start-up, with a different `appId` from the mobile app (e.g. `my-shop-web`). See the README for the script-tag version.
-2. Run `supabase/migrations/20261127030000_recap_dom.sql` and `20261127040000_recap_dom_limits.sql` if they turn on recordings (the second makes web recordings follow the Storage page limits).
+2. Run `supabase/migrations/20261127025000_recap_dom.sql` and `20261127040000_recap_dom_limits.sql` if they turn on recordings (the second makes web recordings follow the Storage page limits).
 3. **Ask** which parts of the site show personal details (account pages, order history, messages) and add
    `class="recap-private"` to them. Form fields are always masked.
 4. Add `Recap.track('event_name', { … })` for the steps that matter (sign-up, add to basket, purchase), as on mobile.

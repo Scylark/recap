@@ -1,10 +1,13 @@
 import type { AnyEvent } from '../types.js';
 export declare const REMOTE_SDK_VERSION = "web-0.1.0";
 /** rrweb's `record` function. Pass `import { record } from 'rrweb'`, or load rrweb with a script tag. */
-export type RrwebRecord = (options: {
+export type RrwebRecord = ((options: {
     emit: (event: RrwebEvent) => void;
     [key: string]: unknown;
-}) => (() => void) | undefined;
+}) => (() => void) | undefined) & {
+    /** rrweb's record.takeFullSnapshot, used to start again after dropping a backlog. */
+    takeFullSnapshot?: (isCheckout?: boolean) => void;
+};
 export interface RrwebEvent {
     type: number;
     timestamp: number;
@@ -64,10 +67,13 @@ export declare class RemoteSink {
     private chain;
     private timer;
     private stopFns;
+    /** Bytes of keepalive requests still on the way. */
+    private keepaliveBytes;
     private domBuffer;
     private domBytes;
     private domSending;
     private stopRecording;
+    private recordFn;
     constructor(config: RemoteConfig, fetchFn?: FetchFn);
     /** Start sending. Returns false if this session wasn't sampled. */
     start(): boolean;
@@ -81,15 +87,29 @@ export declare class RemoteSink {
     private push;
     private batch;
     private target;
+    /**
+     * POST one batch. It goes as keepalive when it fits in what's left of the browser's keepalive
+     * allowance. With `exitOnly` it is only sent as keepalive (the page is closing), and refused otherwise.
+     */
     private post;
     /** Send queued events (and recording chunks). Calls run one after another, never overlapping. */
     flush(): Promise<void>;
+    private markUploaded;
     private sendQueued;
-    /** The page is going away: send what fits in a keepalive request. */
+    /**
+     * The page is hidden or closing: send what fits in keepalive requests. A batch already on the way
+     * is left to finish (it went as keepalive if it fitted). Recording chunks only follow once the
+     * session is stored, because recap_dom drops chunks for sessions it doesn't know yet.
+     */
     private flushOnExit;
+    private sendDomOnExit;
     private startRecording;
+    /** Stop recording this session and drop what's buffered. */
+    private endRecording;
     private pushDom;
+    /** The oldest buffered events, up to maxBytes. Always at least one, so a big snapshot goes alone. */
     private takeDomChunk;
+    private putBackDom;
     private domPayload;
     private sendDom;
     private log;

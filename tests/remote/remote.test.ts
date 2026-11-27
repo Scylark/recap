@@ -147,3 +147,204 @@ describe('RemoteSink without the recordings migration', () => {
     sink.stop();
   });
 });
+
+describe('RemoteSink when the page is hidden or closed', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  type Sent = { url: string; payload: { events: { type: string }[] }; keepalive: boolean };
+
+  /** A fetch whose first `hold` calls wait until release() is called. */
+  function heldFetch(hold = 1, status = (_url: string) => 200) {
+    const sent: Sent[] = [];
+    const waiting: Array<() => void> = [];
+    let held = 0;
+    const fn = (async (url: string, init: RequestInit) => {
+      sent.push({ url, payload: JSON.parse(String(init.body)).payload, keepalive: Boolean(init.keepalive) });
+      if (held < hold) {
+        held++;
+        await new Promise<void>((r) => waiting.push(r));
+      }
+      const s = status(url);
+      return { ok: s < 400, status: s } as Response;
+    }) as unknown as typeof fetch;
+    return { fn, sent, release: () => waiting.splice(0).forEach((r) => r()) };
+  }
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  it('never sends an event twice or drops one when the tab hides mid-upload', async () => {
+    const { fn, sent, release } = heldFetch(1);
+    const sink = new RemoteSink(config, fn);
+    sink.start();
+    sink.handle(nav('/')); // first screen: uploads straight away, and that request is held
+    await tick();
+    sink.handle(click(10, 10, 'A'));
+    window.dispatchEvent(new Event('pagehide')); // exit flush while the first batch is on the way
+    await tick();
+    sink.handle(click(20, 20, 'B'));
+    release();
+    await tick();
+    await sink.flush();
+    sink.stop();
+    const types = sent
+      .filter((c) => c.url.endsWith('recap_ingest'))
+      .flatMap((c) => c.payload.events.map((e) => (e as { data?: { label?: string } }).data?.label ?? e.type));
+    expect(types.sort()).toEqual(['A', 'B', 'screen'].sort());
+    expect(sink.pending()).toHaveLength(0);
+  });
+
+  it('sends no recording on exit until the session is stored', async () => {
+    const { fn, sent, release } = heldFetch(1);
+    let emit: ((e: RrwebEvent) => void) | null = null;
+    const record = (opts: { emit: (e: RrwebEvent) => void }) => {
+      emit = opts.emit;
+      return () => undefined;
+    };
+    const sink = new RemoteSink({ ...config, recordings: { record } }, fn);
+    sink.start();
+    emit!({ type: 2, timestamp: Date.now(), data: {} });
+    sink.handle(nav('/')); // the session's first upload, held
+    await tick();
+    window.dispatchEvent(new Event('pagehide'));
+    await tick();
+    expect(sent.filter((c) => c.url.endsWith('recap_dom'))).toHaveLength(0);
+    release();
+    await sink.flush();
+    const urls = sent.map((c) => c.url.split('/').pop());
+    expect(urls.indexOf('recap_ingest')).toBeLessThan(urls.indexOf('recap_dom'));
+    sink.stop();
+  });
+
+  it('keeps a snapshot too big for keepalive for the next normal upload', async () => {
+    const { fn, sent } = heldFetch(0);
+    let emit: ((e: RrwebEvent) => void) | null = null;
+    const record = (opts: { emit: (e: RrwebEvent) => void }) => {
+      emit = opts.emit;
+      return () => undefined;
+    };
+    const sink = new RemoteSink({ ...config, recordings: { record } }, fn);
+    sink.start();
+    sink.handle(nav('/'));
+    await sink.flush(); // session stored
+    emit!({ type: 2, timestamp: Date.now(), data: { html: 'x'.repeat(100_000) } });
+    window.dispatchEvent(new Event('pagehide'));
+    await tick();
+    expect(sent.filter((c) => c.url.endsWith('recap_dom'))).toHaveLength(0);
+    await sink.flush();
+    const dom = sent.filter((c) => c.url.endsWith('recap_dom'));
+    expect(dom).toHaveLength(1);
+    expect(dom[0]!.keepalive).toBe(false);
+    expect(dom[0]!.payload.events[0]!.type).toBe(2);
+    sink.stop();
+  });
+
+  it('sends small batches as keepalive so they survive the page closing', async () => {
+    const { fn, sent } = heldFetch(0);
+    const sink = new RemoteSink(config, fn);
+    sink.start();
+    sink.handle(nav('/'));
+    await sink.flush();
+    expect(sent[0]!.keepalive).toBe(true);
+    sink.stop();
+  });
+});
+
+describe('RemoteSink recording limits', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  function recorder() {
+    const ctl: { emit: ((e: RrwebEvent) => void) | null; stop: ReturnType<typeof vi.fn> } = { emit: null, stop: vi.fn() };
+    const record = Object.assign(
+      (opts: { emit: (e: RrwebEvent) => void }) => {
+        ctl.emit = opts.emit;
+        return ctl.stop;
+      },
+      { takeFullSnapshot: vi.fn(() => ctl.emit!({ type: 2, timestamp: Date.now(), data: { fresh: true } })) },
+    );
+    return { ctl, record };
+  }
+
+  it('stops recording when the database refuses a chunk, instead of retrying it forever', async () => {
+    const calls: string[] = [];
+    const fn = (async (url: string) => {
+      calls.push(url);
+      const s = url.endsWith('recap_dom') ? 400 : 200;
+      return { ok: s < 400, status: s } as Response;
+    }) as unknown as typeof fetch;
+    const { ctl, record } = recorder();
+    const sink = new RemoteSink({ ...config, recordings: { record } }, fn);
+    sink.start();
+    ctl.emit!({ type: 2, timestamp: Date.now() });
+    sink.handle(nav('/'));
+    await sink.flush();
+    ctl.emit!({ type: 3, timestamp: Date.now() });
+    await sink.flush();
+    expect(calls.filter((u) => u.endsWith('recap_dom'))).toHaveLength(1);
+    expect(ctl.stop).toHaveBeenCalled();
+    sink.stop();
+  });
+
+  it('keeps retrying recordings after server errors', async () => {
+    let fail = true;
+    const calls: string[] = [];
+    const fn = (async (url: string) => {
+      calls.push(url);
+      const s = url.endsWith('recap_dom') && fail ? 503 : 200;
+      return { ok: s < 400, status: s } as Response;
+    }) as unknown as typeof fetch;
+    const { ctl, record } = recorder();
+    const sink = new RemoteSink({ ...config, recordings: { record } }, fn);
+    sink.start();
+    ctl.emit!({ type: 2, timestamp: Date.now() });
+    sink.handle(nav('/'));
+    await sink.flush();
+    const failed = calls.filter((u) => u.endsWith('recap_dom')).length;
+    expect(failed).toBeGreaterThan(0);
+    fail = false;
+    await sink.flush(); // sent now
+    await sink.flush(); // nothing left to send
+    expect(calls.filter((u) => u.endsWith('recap_dom'))).toHaveLength(failed + 1);
+    expect(ctl.stop).not.toHaveBeenCalled();
+    sink.stop();
+  });
+
+  it('starts again from a fresh snapshot instead of buffering without limit', () => {
+    const fn = (async () => ({ ok: false, status: 500 }) as Response) as unknown as typeof fetch;
+    const { ctl, record } = recorder();
+    const sink = new RemoteSink({ ...config, recordings: { record } }, fn);
+    sink.start();
+    for (let i = 0; i < 6; i++) ctl.emit!({ type: 3, timestamp: Date.now(), data: { html: 'x'.repeat(1_000_000) } });
+    expect(record.takeFullSnapshot).toHaveBeenCalledTimes(1);
+    sink.stop();
+  });
+
+  it('gives up on pages too large to store', () => {
+    const { ctl, record } = recorder();
+    const sink = new RemoteSink({ ...config, recordings: { record } }, fakeFetch().fn);
+    sink.start();
+    ctl.emit!({ type: 2, timestamp: Date.now(), data: { html: 'x'.repeat(3_000_000) } });
+    expect(ctl.stop).toHaveBeenCalled();
+    sink.stop();
+  });
+
+  it('records the first snapshot rrweb emits while starting', async () => {
+    const { fn, calls } = fakeFetch();
+    const record = (opts: { emit: (e: RrwebEvent) => void }) => {
+      opts.emit({ type: 4, timestamp: Date.now(), data: { width: 400, height: 800 } });
+      opts.emit({ type: 2, timestamp: Date.now(), data: {} });
+      return () => undefined;
+    };
+    const sink = new RemoteSink({ ...config, recordings: { record } }, fn);
+    sink.start();
+    sink.handle(nav('/'));
+    await sink.flush();
+    const dom = calls.find((c) => c.url.endsWith('recap_dom'))!.body.payload as { events: { type: number }[] };
+    expect(dom.events.map((e) => e.type)).toEqual([4, 2]);
+    sink.stop();
+  });
+});

@@ -1,4 +1,4 @@
--- Storage limits for web page recordings: run after 20261127030000_recap_dom.sql and
+-- Storage limits for web page recordings: run after 20261127025000_recap_dom.sql and
 -- 20261127030000_recap_storage_limits.sql. Safe to run again.
 --
 -- Web recordings (recap_dom) now follow the same settings as app replays: replay_sample decides which

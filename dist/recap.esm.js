@@ -2999,6 +2999,26 @@ const MILESTONES = [25, 50, 75, 100];
 const MAX_BATCH = 200;
 const KEEPALIVE_LIMIT = 6e4;
 const DOM_CHUNK_BYTES = 4e5;
+const DOM_CHUNK_EVENTS = 2e3;
+const DOM_EVENT_MAX_BYTES = 25e5;
+const DOM_BUFFER_MAX_BYTES = 5e6;
+function utf8Bytes(s) {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 128) n += 1;
+    else if (c < 2048) n += 2;
+    else if (c >= 55296 && c <= 56319) {
+      n += 4;
+      i++;
+    } else n += 3;
+  }
+  return n;
+}
+function retryable(err) {
+  const status = err.status;
+  return status === void 0 || status === 408 || status === 429 || status >= 500;
+}
 function uuid() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -3029,10 +3049,12 @@ class RemoteSink {
     this.chain = Promise.resolve();
     this.timer = null;
     this.stopFns = [];
+    this.keepaliveBytes = 0;
     this.domBuffer = [];
     this.domBytes = 0;
     this.domSending = false;
     this.stopRecording = null;
+    this.recordFn = null;
     if (!config.appId) throw new Error("Recap: remote.appId is required");
     if (!config.supabase && !config.endpoint) throw new Error("Recap: remote needs supabase or endpoint");
     this.config = config;
@@ -3171,57 +3193,82 @@ class RemoteSink {
     }
     return null;
   }
-  async post(kind, body, keepalive = false) {
+  /**
+   * POST one batch. It goes as keepalive when it fits in what's left of the browser's keepalive
+   * allowance. With `exitOnly` it is only sent as keepalive (the page is closing), and refused otherwise.
+   */
+  async post(kind, body, exitOnly = false) {
     const target = this.target(kind);
     if (!target) return;
-    const payload = this.config.supabase ? { payload: body } : body;
-    const res = await this.fetchFn(target.url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...target.headers },
-      body: JSON.stringify(payload),
-      keepalive
-    });
-    if (!res.ok) throw Object.assign(new Error(`Recap: upload failed with HTTP ${res.status}`), { status: res.status });
+    const json = JSON.stringify(this.config.supabase ? { payload: body } : body);
+    const size = utf8Bytes(json);
+    const keepalive = this.keepaliveBytes + size <= KEEPALIVE_LIMIT;
+    if (exitOnly && !keepalive) throw new Error("Recap: too large to send while the page closes");
+    if (keepalive) this.keepaliveBytes += size;
+    try {
+      const res = await this.fetchFn(target.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...target.headers },
+        body: json,
+        keepalive
+      });
+      if (!res.ok) throw Object.assign(new Error(`Recap: upload failed with HTTP ${res.status}`), { status: res.status });
+    } finally {
+      if (keepalive) this.keepaliveBytes -= size;
+    }
   }
   /** Send queued events (and recording chunks). Calls run one after another, never overlapping. */
   flush() {
     this.chain = this.chain.then(() => this.sendQueued()).catch(() => void 0);
     return this.chain;
   }
+  markUploaded() {
+    if (this.uploaded) return;
+    this.uploaded = true;
+    store("session", KEY_UPLOADED, this.sessionId);
+  }
   async sendQueued() {
     while (this.queue.length) {
-      const events = this.queue.slice(0, MAX_BATCH);
+      const events = this.queue.splice(0, MAX_BATCH);
       try {
         await this.post("ingest", this.batch(events));
       } catch (err) {
+        this.queue.unshift(...events);
         this.log("upload failed; will retry", err);
         return;
       }
-      this.queue.splice(0, events.length);
-      if (!this.uploaded) {
-        this.uploaded = true;
-        store("session", KEY_UPLOADED, this.sessionId);
-      }
+      this.markUploaded();
       this.log(`uploaded ${events.length} events`);
     }
     await this.sendDom();
   }
-  /** The page is going away: send what fits in a keepalive request. */
+  /**
+   * The page is hidden or closing: send what fits in keepalive requests. A batch already on the way
+   * is left to finish (it went as keepalive if it fitted). Recording chunks only follow once the
+   * session is stored, because recap_dom drops chunks for sessions it doesn't know yet.
+   */
   flushOnExit() {
-    if (this.queue.length) {
-      const events = this.queue.slice(0, MAX_BATCH);
-      const body = this.batch(events);
-      if (JSON.stringify(body).length < KEEPALIVE_LIMIT) {
-        this.queue.splice(0, events.length);
-        void this.post("ingest", body, true).catch(() => void 0);
-        this.uploaded = true;
-        store("session", KEY_UPLOADED, this.sessionId);
+    if (!this.queue.length) {
+      this.sendDomOnExit();
+      return;
+    }
+    const events = this.queue.splice(0, MAX_BATCH);
+    this.post("ingest", this.batch(events), true).then(
+      () => {
+        this.markUploaded();
+        this.sendDomOnExit();
+      },
+      () => {
+        this.queue.unshift(...events);
       }
-    }
-    if (this.uploaded && this.domBuffer.length) {
-      const chunk = this.takeDomChunk(KEEPALIVE_LIMIT);
-      if (chunk.length) void this.post("dom", this.domPayload(chunk), true).catch(() => void 0);
-    }
+    );
+  }
+  sendDomOnExit() {
+    if (!this.uploaded || !this.domBuffer.length) return;
+    const room = KEEPALIVE_LIMIT - this.keepaliveBytes - 1e3;
+    if (room <= 0 || this.domBuffer[0].n > room) return;
+    const chunk = this.takeDomChunk(room);
+    this.post("dom", this.domPayload(chunk), true).catch(() => this.putBackDom(chunk));
   }
   // ---------------------------------------------------------------- recordings
   startRecording() {
@@ -3239,6 +3286,7 @@ class RemoteSink {
       return;
     }
     const block = ["[data-ut-no-track]", ".ut-block", ".recap-private", o.blockSelector].filter(Boolean).join(", ");
+    this.recordFn = record;
     const stop = record({
       emit: (e) => this.pushDom(e),
       maskAllInputs: true,
@@ -3249,28 +3297,62 @@ class RemoteSink {
       sampling: { mousemove: 50, scroll: 100, input: "last", media: 800 },
       slimDOMOptions: { script: true, comment: true, headFavicon: true, headWhitespace: true, headMetaSocial: true }
     });
+    if (!this.recordFn) {
+      stop?.();
+      return;
+    }
     this.stopRecording = stop ?? null;
     this.log("recording the page for replay");
   }
+  /** Stop recording this session and drop what's buffered. */
+  endRecording(reason) {
+    this.log(reason);
+    this.stopRecording?.();
+    this.stopRecording = null;
+    this.recordFn = null;
+    this.domBuffer = [];
+    this.domBytes = 0;
+  }
   pushDom(e) {
-    const t = Math.max(0, e.timestamp - this.startMs);
-    this.domBuffer.push({ t, e });
-    this.domBytes += JSON.stringify(e).length;
+    if (!this.recordFn) return;
+    const n = utf8Bytes(JSON.stringify(e));
+    if (n > DOM_EVENT_MAX_BYTES) {
+      this.endRecording(`recordings are off for this session: the page is too large to record (${Math.round(n / 1e6)} MB)`);
+      return;
+    }
+    this.domBuffer.push({ t: Math.max(0, e.timestamp - this.startMs), e, n });
+    this.domBytes += n;
+    if (this.domBytes > DOM_BUFFER_MAX_BYTES) {
+      this.domBuffer = [];
+      this.domBytes = 0;
+      if (this.recordFn.takeFullSnapshot) {
+        this.log("recording buffer full while offline; starting again from a fresh snapshot");
+        this.recordFn.takeFullSnapshot(true);
+      } else {
+        this.endRecording("recordings are off for this session: too much recording waiting to be sent");
+      }
+      return;
+    }
     if (this.domBytes >= DOM_CHUNK_BYTES && this.uploaded) void this.sendDom();
   }
+  /** The oldest buffered events, up to maxBytes. Always at least one, so a big snapshot goes alone. */
   takeDomChunk(maxBytes) {
     const out = [];
     let size = 0;
-    while (this.domBuffer.length) {
+    while (this.domBuffer.length && out.length < DOM_CHUNK_EVENTS) {
       const next = this.domBuffer[0];
-      const n = JSON.stringify(next.e).length;
-      if (out.length && size + n > maxBytes) break;
+      if (out.length && size + next.n > maxBytes) break;
       out.push(next);
-      size += n;
+      size += next.n;
       this.domBuffer.shift();
-      this.domBytes -= n;
+      this.domBytes -= next.n;
     }
     return out;
+  }
+  putBackDom(chunk) {
+    if (!this.recordFn) return;
+    this.domBuffer.unshift(...chunk);
+    this.domBytes += chunk.reduce((n, c) => n + c.n, 0);
   }
   domPayload(chunk) {
     return { appId: this.config.appId, sessionId: this.sessionId, t: chunk[0]?.t ?? 0, events: chunk.map((c) => c.e) };
@@ -3285,16 +3367,16 @@ class RemoteSink {
           await this.post("dom", this.domPayload(chunk));
           this.log(`uploaded ${chunk.length} recording events`);
         } catch (err) {
-          if (err.status === 404) {
-            this.log("recordings are off: run supabase/migrations/*_recap_dom.sql in your Supabase project");
-            this.stopRecording?.();
-            this.stopRecording = null;
-            this.domBuffer = [];
-            this.domBytes = 0;
+          const status = err.status;
+          if (status === 404) {
+            this.endRecording("recordings are off: run supabase/migrations/*_recap_dom.sql in your Supabase project");
             break;
           }
-          this.domBuffer.unshift(...chunk);
-          this.domBytes += chunk.reduce((n, c) => n + JSON.stringify(c.e).length, 0);
+          if (!retryable(err)) {
+            this.endRecording(`recordings are off for this session: the database refused a chunk (HTTP ${status})`);
+            break;
+          }
+          this.putBackDom(chunk);
           this.log("recording upload failed; will retry", err);
           break;
         }
