@@ -19,23 +19,36 @@ export function sanitizeUrl(rawUrl: string, stripQuery = true): string {
   }
 }
 
-/** Elements (and everything inside them) that are never tracked: no taps, no recordings. */
-export const EXCLUDE_SELECTOR = '[data-ut-no-track], .ut-block, .recap-private';
+/**
+ * The privacy marker: elements (and everything inside them) that are never tracked. No taps are
+ * counted there, they are left out of recordings, and on <html> or <body> scroll depth stops too.
+ * `data-recap-private` and `class="recap-private"` are the documented names; `data-ut-no-track`
+ * and `ut-block` are older names that keep working. (The script tag's own `data-recap`
+ * attribute is a different attribute and marks nothing.)
+ */
+export const EXCLUDE_SELECTOR = '[data-recap-private], .recap-private, [data-ut-no-track], .ut-block';
+
+/**
+ * Text that is never used: not in tap labels or headings, and replaced with * in recordings.
+ * `data-recap-mask` and `class="recap-mask"` are the documented names; `ut-mask` keeps working.
+ */
+export const MASK_SELECTOR = '[data-recap-mask], .recap-mask, .ut-mask';
 
 /**
  * Return true if an element should be completely excluded from tracking: it, or an element around
- * it, has data-ut-no-track, class ut-block or class recap-private.
+ * it, has the privacy marker (data-recap-private or class recap-private, or the older
+ * data-ut-no-track or ut-block).
  */
 export function isExcluded(el: Element): boolean {
   return el.closest(EXCLUDE_SELECTOR) !== null;
 }
 
 /**
- * Return true if an element's text should never be used: it, or an element around it, has class
- * ut-mask.
+ * Return true if an element's text should never be used: it, or an element around it, has the
+ * mask marker (data-recap-mask or class recap-mask, or the older ut-mask).
  */
 export function isMasked(el: Element): boolean {
-  return el.closest('.ut-mask') !== null;
+  return el.closest(MASK_SELECTOR) !== null;
 }
 
 // --- Labels ---
@@ -45,7 +58,7 @@ export function isMasked(el: Element): boolean {
  * - `'text'`: also the element's visible text (first 50 characters).
  * - `'attributes'`: only aria-label, aria-labelledby, title, alt and placeholder, never visible text.
  * - `'none'`: only labels you write yourself with data-ut-label.
- * data-ut-label is always used, in every mode and inside ut-mask: it is the developer's own words.
+ * data-ut-label is always used, in every mode and inside the mask marker: it is the developer's own words.
  */
 export type LabelMode = 'none' | 'attributes' | 'text';
 
@@ -104,7 +117,7 @@ function textOf(el: Element): string {
  * Extract the best human-readable label for a clicked element.
  * Priority: data-ut-label > aria-label > aria-labelledby > title > alt >
  *           visible text (50 chars, `'text'` mode only) > placeholder.
- * Inside ut-mask, and in `'none'` mode, only data-ut-label is used.
+ * Inside the mask marker (data-recap-mask, recap-mask, ut-mask), and in `'none'` mode, only data-ut-label is used.
  */
 export function extractLabel(el: Element, mode: LabelMode = _labelMode): string | null {
   // 1. Explicit label: the developer's own words, always allowed.

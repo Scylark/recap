@@ -17,6 +17,18 @@ import { summarize } from './analysis/summarize.js';
 import { exportJSON, exportCSV, exportSummaryJSON } from './storage/export.js';
 import { RemoteSink, type RemoteConfig } from './remote/remote.js';
 import { setLabelMode, setScreenNamer } from './privacy/sanitize.js';
+import {
+  gpcOn,
+  hostAllowed,
+  inFrame,
+  pathExcluded,
+  readTabSwitch,
+  secretKeyKind,
+  secretKeyMessage,
+  type RecapStatus,
+  type RecapStatusReason,
+  type TabSwitch,
+} from './gate.js';
 
 // --- State ---
 
@@ -24,7 +36,10 @@ import { setLabelMode, setScreenNamer } from './privacy/sanitize.js';
 const KEY_CONSENT = 'recap-consent';
 type Consent = 'granted' | 'denied' | 'unknown';
 
+/** init() has been called, so the settings are known. */
 let _initialized = false;
+/** The capture listeners are running. Not on a page the gate stops (wrong host, GPC, a frame...). */
+let _capturing = false;
 let _destroyFns: Array<() => void> = [];
 /** Listeners for the panel's shortcut and touch-hold, re-made whenever init() changes them. */
 let _panelStops: Array<() => void> = [];
@@ -34,9 +49,20 @@ let _config: RecapConfig = {};
 let _scriptDefaults: RecapConfig = {};
 let _remote: RemoteSink | null = null;
 let _remoteConfig: RemoteConfig | null = null;
+/** This session was left out by the dashboard's sampleRate: don't try to connect again. */
+let _unsampled = false;
 /** Events seen before the dashboard connection started, so the first page view isn't lost. */
 let _early: AnyEvent[] = [];
 let _consent: Consent | null = null; // null: not read from storage yet
+/** This tab's ?recap= switch. undefined: not read yet. */
+let _switch: TabSwitch | undefined;
+/** The key last checked for being a secret one, and the answer. */
+let _keyChecked: string | undefined;
+let _secretKey: 'service_role' | 'sb_secret' | null = null;
+/** This page load has been on a path in excludePaths: page recording stays off until the next load. */
+let _sawExcludedPath = false;
+/** The status reason last logged in debug mode, so each is logged once. */
+let _loggedReason: RecapStatusReason | null = null;
 
 function consent(): Consent {
   if (_consent === null) {
@@ -59,16 +85,123 @@ function saveConsent(value: 'granted' | 'denied'): void {
   }
 }
 
-/** Whether events may be recorded right now (consent and opt-out). */
-function allowed(): boolean {
+// --- The live-site gate ---
+
+function tabSwitch(): TabSwitch {
+  if (_switch === undefined) _switch = typeof location !== 'undefined' ? readTabSwitch(location.search) : null;
+  return _switch;
+}
+
+/** Sessions go to a dashboard: `supabase`, `remote` or connect(). The live-site defaults apply. */
+function connected(): boolean {
+  return _remoteConfig !== null || _remote !== null;
+}
+
+function debugOn(): boolean {
+  const sw = tabSwitch();
+  return _config.debug === true || sw === 'on' || sw === 'record';
+}
+
+/** A secret Supabase key anywhere in the settings, checked (and reported) once per key. */
+function secretKey(): 'service_role' | 'sb_secret' | null {
+  const key = _remoteConfig?.supabase?.anonKey ?? _config.supabase?.anonKey;
+  if (key !== _keyChecked) {
+    _keyChecked = key;
+    _secretKey = secretKeyKind(key) ?? secretKeyKind(_config.supabase?.anonKey);
+    if (_secretKey) console.error(secretKeyMessage(_secretKey));
+  }
+  return _secretKey;
+}
+
+/** What stops Recap on this page as a whole. These don't change while the page is open. */
+function pageBlock(): RecapStatusReason | null {
+  const sw = tabSwitch();
+  if (sw === 'off') return 'switched-off';
+  const live = connected();
+  if (!(_config.allowInFrames ?? !live) && inFrame()) return 'in-frame';
+  if (secretKey()) return 'secret-key';
+  const hosts = _config.hosts;
+  const hostname = typeof location !== 'undefined' ? location.hostname : '';
+  if (hosts && sw !== 'on' && sw !== 'record' && !hostAllowed(hostname, hosts)) return 'host-not-listed';
+  if ((_config.respectGPC ?? live) && gpcOn()) return 'gpc';
+  return null;
+}
+
+/** What stops recording right now, or null: the page, then its path, then consent and opt-out. */
+function blockReason(): RecapStatusReason | null {
+  const page = pageBlock();
+  if (page) return page;
+  if (typeof location !== 'undefined' && pathExcluded(location.pathname, _config.excludePaths)) return 'excluded-path';
   const c = consent();
-  if (c === 'denied') return false;
-  if (_config.requireConsent && c !== 'granted') return false;
-  return true;
+  if (c === 'denied') return 'opted-out';
+  if (_config.requireConsent && c !== 'granted') return 'consent-needed';
+  return null;
+}
+
+/** Whether events may be recorded right now (the gate, consent and opt-out). */
+function allowed(): boolean {
+  return blockReason() === null;
+}
+
+function currentStatus(): RecapStatus {
+  if (!_initialized) return { running: false, recording: false, reason: 'not-started' };
+  const reason = blockReason() ?? (_capturing ? 'running' : 'not-started');
+  const running = reason === 'running';
+  return { running, recording: running && (_remote?.isRecordingPage() ?? false), reason };
+}
+
+function explain(reason: RecapStatusReason): string {
+  switch (reason) {
+    case 'switched-off':
+      return '?recap=off is set for this tab; open the page with ?recap=auto to clear it';
+    case 'in-frame':
+      return 'the page is inside an iframe; set allowInFrames: true to run there';
+    case 'secret-key':
+      return 'the Supabase key is a secret key; use the anon or publishable key';
+    case 'host-not-listed':
+      return `${location.hostname} is not in hosts; add ?recap=on to the address to test here`;
+    case 'excluded-path':
+      return `${location.pathname} matches excludePaths`;
+    case 'gpc':
+      return 'this browser sends Global Privacy Control (respectGPC)';
+    case 'opted-out':
+      return 'Recap.optOut() was called in this browser; Recap.optIn() undoes it';
+    case 'consent-needed':
+      return 'requireConsent is on and Recap.optIn() has not been called';
+    default:
+      return reason;
+  }
+}
+
+/** In debug mode, say why Recap is or isn't running, once for each reason. */
+function reportStatus(): void {
+  if (!_initialized || !debugOn()) return;
+  const { reason } = currentStatus();
+  if (reason === _loggedReason) return;
+  _loggedReason = reason;
+  if (reason === 'running') {
+    console.log(`[Recap] running: ${connected() ? 'sending sessions to the dashboard' : 'keeping data in this browser'}`);
+  } else {
+    console.log(`[Recap] not running: ${reason} (${explain(reason)})`);
+  }
+}
+
+/** The page went to a path in excludePaths: no page recording until the next full page load. */
+function onExcludedPath(): void {
+  if (_sawExcludedPath) return;
+  _sawExcludedPath = true;
+  _remote?.blockRecording('recordings are off for the rest of this page: it went to a page in excludePaths');
 }
 
 function capture(e: AnyEvent): void {
-  if (!allowed()) return;
+  const reason = blockReason();
+  if (reason) {
+    if (reason === 'excluded-path') onExcludedPath();
+    reportStatus();
+    return;
+  }
+  if (!_remote) connectIfAllowed(); // e.g. a single-page app left an excluded page
+  reportStatus();
   push(e);
   if (_remote) _remote.handle(e);
   else if (_early.length < 200) _early.push(e);
@@ -84,14 +217,28 @@ function given(config: RecapConfig): RecapConfig {
 function refreshLabels(): void {
   // Text stays in the browser in the default mode, so it may label taps there. Once sessions go to
   // a dashboard, only attributes made for labelling are used unless the app says otherwise.
-  setLabelMode(_config.labels ?? (_remoteConfig || _remote ? 'attributes' : 'text'));
+  setLabelMode(_config.labels ?? (connected() ? 'attributes' : 'text'));
+}
+
+/** The dashboard settings with this page's debug setting on top. */
+function sinkConfig(rc: RemoteConfig): RemoteConfig {
+  return { ...rc, ...(debugOn() ? { debug: true } : {}) };
 }
 
 function connectIfAllowed(): void {
-  if (_remote || !_remoteConfig || !_initialized || !allowed()) return;
+  if (_remote || _unsampled || !_remoteConfig || !_capturing || !allowed()) return;
   try {
-    const sink = new RemoteSink(_remoteConfig);
-    if (!sink.start()) return;
+    const sw = tabSwitch();
+    const sink = new RemoteSink(sinkConfig(_remoteConfig), undefined, {
+      sampleIn: sw === 'on' || sw === 'record',
+      recordIn: sw === 'record',
+    });
+    if (_sawExcludedPath) sink.blockRecording('recordings are off for this page: it was on a page in excludePaths');
+    if (!sink.start()) {
+      _unsampled = true;
+      _early = [];
+      return;
+    }
     _remote = sink;
     for (const e of _early) sink.handle(e);
     _early = [];
@@ -105,7 +252,8 @@ function connectIfAllowed(): void {
 export const Recap = {
   /**
    * Start Recap, or change its settings. The first call starts capturing; later calls change only
-   * the settings they pass (panel, labels, screen names, consent, dashboard connection).
+   * the settings they pass (panel, labels, screen names, consent, dashboard connection). On a page
+   * the gate stops (see status()), nothing starts.
    */
   init(config: RecapConfig = {}): void {
     _config = { ..._scriptDefaults, ..._config, ...given(config) };
@@ -114,26 +262,32 @@ export const Recap = {
     if (!_remoteConfig) _remoteConfig = remoteFrom(_config);
     setScreenNamer(_config.screenName);
     refreshLabels();
+    _initialized = true;
 
-    const first = !_initialized;
-    if (first) {
-      _initialized = true;
+    const starting = !_capturing && pageBlock() === null;
+    if (starting) {
+      _capturing = true;
       startCapture(_config);
     }
     // The first call opens the panel if any setting asks; later calls only if they ask themselves.
-    applyPanel(first ? _config.showPanel === true : config.showPanel === true);
+    applyPanel(starting ? _config.showPanel === true : config.showPanel === true);
     connectIfAllowed();
+    reportStatus();
   },
 
   /**
    * Send this session to your Recap dashboard as well (Supabase or an endpoint). Call init() first.
    * Safe to call more than once; only the first settings are used. With `requireConsent`, the
-   * connection starts once the visitor opts in.
+   * connection starts once the visitor opts in. The live-site defaults apply from here on: the
+   * panel is off unless `panel: true`, labels come from attributes, GPC is respected and nothing
+   * runs inside an iframe.
    */
   connect(config: RemoteConfig): void {
     if (!_remoteConfig) _remoteConfig = config;
     refreshLabels();
+    if (_initialized) applyPanel(false);
     connectIfAllowed();
+    reportStatus();
   },
 
   /**
@@ -141,9 +295,10 @@ export const Recap = {
    * this browser. Needed only with `requireConsent`, or after optOut().
    */
   optIn(): void {
-    const was = _initialized && allowed();
+    const was = _capturing && allowed();
     saveConsent('granted');
     resumeAfterOptIn(was);
+    reportStatus();
   },
 
   /**
@@ -153,11 +308,22 @@ export const Recap = {
   optOut(): void {
     saveConsent('denied');
     stopAfterOptOut();
+    reportStatus();
   },
 
-  /** Whether Recap is recording now: started, and not waiting for consent or opted out. */
+  /** Whether Recap is recording now: started, and not stopped by the gate, consent or opt-out. */
   isRecording(): boolean {
-    return _initialized && allowed();
+    return _capturing && allowed();
+  },
+
+  /**
+   * Whether Recap is running on this page and, if not, why: `{ running, recording, reason }`.
+   * `recording` is true while this tab's page is recorded for replay. `reason` is `'running'`, or
+   * what stops it: `'not-started'`, `'host-not-listed'`, `'excluded-path'`, `'gpc'`, `'opted-out'`,
+   * `'consent-needed'`, `'in-frame'`, `'secret-key'` or `'switched-off'`.
+   */
+  status(): RecapStatus {
+    return currentStatus();
   },
 
   /** Record a custom event, e.g. Recap.track('added_to_basket', { sku: 'A1' }). Sent only when connected. */
@@ -214,12 +380,19 @@ export const Recap = {
     _remote?.stop();
     _remote = null;
     _remoteConfig = null;
+    _unsampled = false;
     _early = [];
     _config = {};
     _consent = null;
+    _switch = undefined;
+    _keyChecked = undefined;
+    _secretKey = null;
+    _sawExcludedPath = false;
+    _loggedReason = null;
     setScreenNamer(null);
     setLabelMode('text');
     _initialized = false;
+    _capturing = false;
   },
 };
 
@@ -235,7 +408,7 @@ function stopAfterOptOut(): void {
 }
 
 function resumeAfterOptIn(wasRecording: boolean): void {
-  if (!_initialized) return;
+  if (!_capturing) return;
   connectIfAllowed();
   // Start the session on the page they're on, since nothing was recorded until now.
   if (!wasRecording && allowed()) emitCurrentPage();
@@ -247,10 +420,11 @@ function resumeAfterOptIn(wasRecording: boolean): void {
  */
 function onConsentChangedElsewhere(e: StorageEvent): void {
   if (e.key !== KEY_CONSENT && e.key !== null) return; // null: storage cleared
-  const was = _initialized && allowed();
+  const was = _capturing && allowed();
   _consent = null; // read it again
   if (consent() === 'denied') stopAfterOptOut();
   else if (consent() === 'granted') resumeAfterOptIn(was);
+  reportStatus();
 }
 
 /**
@@ -309,13 +483,21 @@ function togglePanel(): void {
   }
 }
 
+/**
+ * Whether the panel, its shortcut and its touch-hold are on: `panel` if set, otherwise on while data
+ * stays in the browser and off once sessions go to a dashboard. Never on a page the gate stops.
+ */
+function panelOn(): boolean {
+  return _capturing && pageBlock() === null && (_config.panel ?? !connected());
+}
+
 /** (Re)make the panel's shortcut and touch-hold from the current settings. */
 function applyPanel(show: boolean): void {
   _panelStops.forEach((fn) => fn());
   _panelStops = [];
   const c = _config;
 
-  if (c.panel === false) {
+  if (!panelOn()) {
     if (isPanelOpen()) closePanel();
     return;
   }

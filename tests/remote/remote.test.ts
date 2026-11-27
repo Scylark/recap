@@ -365,15 +365,18 @@ describe('RemoteSink recordings text masking', () => {
     return (record.mock.calls[0] as unknown as [Record<string, unknown>])[0];
   }
 
-  it('masks .ut-mask text by default, all text with maskText: true, or a selector', () => {
-    expect(optionsFor()).toMatchObject({ maskAllInputs: true, maskTextSelector: '.ut-mask' });
+  // The mask marker: data-recap-mask and recap-mask, and the older ut-mask.
+  const MASK = '[data-recap-mask], .recap-mask, .ut-mask';
+
+  it('masks the mask marker by default, all text with maskText: true, or a selector', () => {
+    expect(optionsFor()).toMatchObject({ maskAllInputs: true, maskTextSelector: MASK });
     expect(optionsFor(true)).toMatchObject({ maskAllInputs: true, maskTextSelector: '*' });
     expect(optionsFor('.ride-name, [data-private-text]')).toMatchObject({
       maskAllInputs: true,
-      maskTextSelector: '.ut-mask, .ride-name, [data-private-text]',
+      maskTextSelector: `${MASK}, .ride-name, [data-private-text]`,
     });
-    expect(maskTextSelectorFor(false)).toBe('.ut-mask');
-    expect(maskTextSelectorFor('  ')).toBe('.ut-mask');
+    expect(maskTextSelectorFor(false)).toBe(MASK);
+    expect(maskTextSelectorFor('  ')).toBe(MASK);
   });
 
   it('keeps blocking private parts as well as masking text', () => {

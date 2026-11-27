@@ -801,7 +801,7 @@ export async function openPanel(): Promise<void> {
   _panelRoot = document.createElement('div');
   _panelRoot.className = `${PREFIX}-root`;
   _panelRoot.setAttribute('data-recap-panel', 'true');
-  _panelRoot.setAttribute('data-ut-no-track', '');
+  _panelRoot.setAttribute('data-recap-private', '');
 
   render(_panelRoot, _sessions);
   document.body.appendChild(_panelRoot);

@@ -41,7 +41,7 @@ function getScrollDepth(): number {
 
 function emitScroll(depth: number): void {
   if (!_handler || _paused) return;
-  // A whole page marked private (data-ut-no-track, ut-block or recap-private on <html> or <body>):
+  // A whole page marked private (the privacy marker on <html> or <body>):
   // its scrolling isn't counted either.
   if (document.body && isExcluded(document.body)) return;
   _maxDepth = Math.max(_maxDepth, depth);

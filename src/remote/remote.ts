@@ -1,19 +1,79 @@
 // Recap remote mode: sends the web tracker's events to your own Supabase project (or any endpoint),
 // in the same format as the React Native SDK, so web sessions sit next to iOS and Android ones in the
-// Recap dashboard. Optional page recordings for replay use rrweb, which you pass in.
+// Recap dashboard. Optional page recordings for replay use rrweb: passed in, already on the page, or
+// loaded on demand from recap-rrweb.min.js for tabs sampled in.
 //
 // Without `remote` in the config none of this runs and Recap keeps everything in the browser.
 
 import type { AnyEvent } from '../types.js';
 import { getSessionId } from '../capture/session.js';
+import { EXCLUDE_SELECTOR, MASK_SELECTOR } from '../privacy/sanitize.js';
+import { secretKeyKind, secretKeyMessage } from '../gate.js';
 
-export const REMOTE_SDK_VERSION = 'web-0.2.0';
+export const REMOTE_SDK_VERSION = 'web-0.3.0';
 
-/** The rrweb maskTextSelector for a recordings.maskText setting. `.ut-mask` text is always masked. */
+/** The rrweb maskTextSelector for a recordings.maskText setting. The mask marker is always masked. */
 export function maskTextSelectorFor(maskText: boolean | string | undefined): string {
   if (maskText === true) return '*';
   const extra = typeof maskText === 'string' ? maskText.trim() : '';
-  return extra ? `.ut-mask, ${extra}` : '.ut-mask';
+  return extra ? `${MASK_SELECTOR}, ${extra}` : MASK_SELECTOR;
+}
+
+/** Canvas frames per second for a recordings.canvas setting: 2 for true, the number given, or 0 (off). */
+export function canvasFps(canvas: boolean | number | undefined): number {
+  if (canvas === true) return 2;
+  return typeof canvas === 'number' && Number.isFinite(canvas) && canvas > 0 ? canvas : 0;
+}
+
+// ---------------------------------------------------------------- loading rrweb on demand
+
+let _defaultRrwebSrc: string | null = null;
+
+/**
+ * Where to load recap-rrweb.min.js from when recordings.src isn't set. The script-tag build sets it
+ * to the folder recap.min.js was loaded from.
+ * @internal
+ */
+export function setDefaultRrwebSrc(src: string | null): void {
+  _defaultRrwebSrc = src;
+}
+
+const _loads = new Map<string, Promise<void>>();
+
+/**
+ * Add a <script> for `src` once per address, resolving when it has run. Rejects (never throws) if
+ * it can't load: offline, blocked by a Content-Security-Policy, the wrong address or the wrong
+ * integrity hash. A failed address can be tried again by a later call.
+ */
+export function loadScript(src: string, integrity?: string): Promise<void> {
+  const known = _loads.get(src);
+  if (known) return known;
+  const p = new Promise<void>((resolve, reject) => {
+    try {
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      if (integrity) {
+        s.integrity = integrity;
+        s.crossOrigin = 'anonymous'; // subresource integrity needs a CORS request
+      }
+      s.onload = () => resolve();
+      s.onerror = () => {
+        s.remove();
+        reject(new Error(`could not load ${src}`));
+      };
+      (document.head ?? document.documentElement).appendChild(s);
+    } catch (err) {
+      reject(err);
+    }
+  });
+  _loads.set(src, p);
+  p.catch(() => _loads.delete(src));
+  return p;
+}
+
+function pageRecord(): RrwebRecord | undefined {
+  return (globalThis as unknown as { rrweb?: { record?: RrwebRecord } }).rrweb?.record;
 }
 
 /** rrweb's `record` function. Pass `import { record } from 'rrweb'`, or load rrweb with a script tag. */
@@ -32,16 +92,34 @@ export interface RrwebEvent {
 }
 
 export interface RemoteRecordingOptions {
-  /** rrweb's record function. Defaults to `window.rrweb.record` when rrweb is on the page. */
+  /**
+   * rrweb's record function (`import { record } from 'rrweb'`, version 2.2.2). Without it Recap
+   * uses `window.rrweb.record` if rrweb is on the page, or else loads recap-rrweb.min.js from `src`.
+   */
   record?: RrwebRecord;
-  /** Share of sessions to record, 0 to 1. Default 1. */
+  /**
+   * Address of recap-rrweb.min.js (rrweb's recorder as a plain script), loaded only for tabs sampled
+   * in for recordings and only when `record` isn't given. The script-tag build defaults to the folder
+   * recap.min.js came from; module builds need this or `record`. Script tag: data-recordings-src.
+   */
+  src?: string;
+  /** Subresource integrity hash for `src`, e.g. "sha384-…". Script tag: data-recordings-integrity. */
+  integrity?: string;
+  /** Share of tabs to record, 0 to 1. Default 1. Script tag: data-record-sample. */
   sampleRate?: number;
-  /** Extra CSS selector for parts of the page never recorded. `[data-ut-no-track]` and `.recap-private` always are. */
+  /**
+   * Record <canvas> drawings (charts, for example) as pictures: `true` for 2 frames a second, or a
+   * number of frames a second. Unchanged frames aren't sent again. Default off. Script tag:
+   * data-record-canvas.
+   */
+  canvas?: boolean | number;
+  /** Extra CSS selector for parts of the page never recorded. The privacy marker (`data-recap-private`, `.recap-private`) always is. */
   blockSelector?: string;
   /**
    * Text to replace with `*` in recordings, keeping the layout: `true` for all text on the page, or
-   * a CSS selector for the parts to mask (and everything inside them). Text inside `.ut-mask` is
-   * always masked. Form fields are always masked, whatever this says. Default: only `.ut-mask`.
+   * a CSS selector for the parts to mask (and everything inside them). Text inside the mask marker
+   * (`data-recap-mask`, `.recap-mask`) is always masked. Form fields are always masked, whatever
+   * this says. Default: only the mask marker.
    */
   maskText?: boolean | string;
 }
@@ -63,6 +141,14 @@ export interface RemoteConfig {
   recordings?: boolean | RemoteRecordingOptions;
   /** Log what Recap is doing to the console. */
   debug?: boolean;
+}
+
+/** How the web tracker starts a sink in a tab with a test switch (?recap=on or ?recap=record). */
+export interface SinkOptions {
+  /** Send this session whatever `sampleRate` says. */
+  sampleIn?: boolean;
+  /** Record this tab's page whatever `recordings.sampleRate` says. */
+  recordIn?: boolean;
 }
 
 interface IngestEvent {
@@ -91,6 +177,8 @@ const DOM_CHUNK_BYTES = 400_000;
 /** recap_dom takes at most 5000 events and about 3 MB per chunk. */
 const DOM_CHUNK_EVENTS = 2000;
 const DOM_EVENT_MAX_BYTES = 2_500_000;
+/** Debug mode warns about full snapshots above this, as they near DOM_EVENT_MAX_BYTES. */
+const DOM_SNAPSHOT_WARN_BYTES = 2_000_000;
 /** Most recording kept in memory while it can't be sent (offline, or the session not stored yet). */
 const DOM_BUFFER_MAX_BYTES = 5_000_000;
 
@@ -186,12 +274,18 @@ export class RemoteSink {
   private domSending = false;
   private stopRecording: (() => void) | null = null;
   private recordFn: RrwebRecord | null = null;
+  /** Started and not stopped: a recorder that finishes loading after stop() must not start. */
+  private active = false;
+  /** Recording is off for the rest of this page load (it went to a path in excludePaths). */
+  private recordingBlocked = false;
+  private readonly opts: SinkOptions;
 
-  constructor(config: RemoteConfig, fetchFn: FetchFn = (...a) => fetch(...a)) {
+  constructor(config: RemoteConfig, fetchFn: FetchFn = (...a) => fetch(...a), opts: SinkOptions = {}) {
     if (!config.appId) throw new Error('Recap: remote.appId is required');
     if (!config.supabase && !config.endpoint) throw new Error('Recap: remote needs supabase or endpoint');
     this.config = config;
     this.fetchFn = fetchFn;
+    this.opts = opts;
     this.sessionId = getSessionId();
 
     // One session can span several page loads in the same tab, so its start time lives in sessionStorage.
@@ -201,13 +295,20 @@ export class RemoteSink {
     this.uploaded = store('session', KEY_UPLOADED) === this.sessionId;
 
     const savedSample = store('session', KEY_SAMPLED);
-    this.sampled = savedSample !== null ? savedSample === '1' : Math.random() < (config.sampleRate ?? 1);
+    this.sampled =
+      opts.sampleIn === true || (savedSample !== null ? savedSample === '1' : Math.random() < (config.sampleRate ?? 1));
     store('session', KEY_SAMPLED, this.sampled ? '1' : '0');
   }
 
-  /** Start sending. Returns false if this session wasn't sampled. */
+  /** Start sending. Returns false if this session wasn't sampled, or the key is a secret one. */
   start(): boolean {
+    const secret = secretKeyKind(this.config.supabase?.anonKey);
+    if (secret) {
+      console.error(secretKeyMessage(secret));
+      return false;
+    }
     if (!this.sampled) return false;
+    this.active = true;
     this.timer = setInterval(() => void this.flush(), this.config.flushIntervalMs ?? 5000);
     const onVis = (): void => {
       const hidden = document.visibilityState === 'hidden';
@@ -227,6 +328,7 @@ export class RemoteSink {
   }
 
   stop(): void {
+    this.active = false;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.stopRecording?.();
@@ -242,6 +344,7 @@ export class RemoteSink {
    * earlier visits.
    */
   discard(): void {
+    this.active = false;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.stopFns.forEach((f) => f());
@@ -257,6 +360,25 @@ export class RemoteSink {
 
   getSessionId(): string {
     return this.sessionId;
+  }
+
+  /** Whether this tab's page is being recorded now. */
+  isRecordingPage(): boolean {
+    return this.recordFn !== null && !this.recordingBlocked;
+  }
+
+  /**
+   * Stop recording the page for the rest of this page load, and don't start (or finish loading) a
+   * recorder. What was recorded before is still sent. Used when a single-page app goes to a path
+   * in excludePaths: the private page can stay on screen for a moment after the address changes,
+   * so a fresh snapshot taken when it leaves could still show it.
+   */
+  blockRecording(reason: string): void {
+    if (this.recordingBlocked) return;
+    this.recordingBlocked = true;
+    if (this.recordFn) this.log(reason);
+    this.stopRecording?.();
+    this.stopRecording = null;
   }
 
   /** Feed one event from the web tracker's capture layers. */
@@ -450,41 +572,83 @@ export class RemoteSink {
   // ---------------------------------------------------------------- recordings
 
   private startRecording(): void {
-    const opt = this.config.recordings;
-    if (!opt) return;
-    const o: RemoteRecordingOptions = opt === true ? {} : opt;
-    const key = 'recap-remote-rec';
-    const saved = store('session', key);
-    const on = saved !== null ? saved === '1' : Math.random() < (o.sampleRate ?? 1);
-    store('session', key, on ? '1' : '0');
-    if (!on) return;
-    const record =
-      o.record ?? (globalThis as unknown as { rrweb?: { record?: RrwebRecord } }).rrweb?.record;
-    if (!record) {
-      this.log('recordings are on but rrweb was not found: pass recordings.record, or load rrweb first');
-      return;
+    try {
+      const opt = this.config.recordings;
+      if (!opt || this.recordingBlocked) return;
+      const o: RemoteRecordingOptions = opt === true ? {} : opt;
+      const key = 'recap-remote-rec';
+      const saved = store('session', key);
+      const on = this.opts.recordIn === true || (saved !== null ? saved === '1' : Math.random() < (o.sampleRate ?? 1));
+      store('session', key, on ? '1' : '0');
+      if (!on) {
+        // Tabs left out never load the recorder.
+        this.log('recordings: this tab is not in the recorded share (recordings.sampleRate)');
+        return;
+      }
+      const record = o.record ?? pageRecord();
+      if (record) {
+        this.beginRecording(record, o);
+        return;
+      }
+      const src = o.src ?? _defaultRrwebSrc;
+      if (!src) {
+        this.log(
+          "recordings are on but rrweb isn't loaded: pass recordings.record (import { record } from 'rrweb'), " +
+            'or recordings.src with the address of recap-rrweb.min.js',
+        );
+        return;
+      }
+      this.log(`loading the recorder from ${src}`);
+      loadScript(src, o.integrity).then(
+        () => {
+          if (!this.active || this.recordingBlocked || this.recordFn) return;
+          const loaded = pageRecord();
+          if (loaded) this.beginRecording(loaded, o);
+          else this.log(`recordings are off for this page: ${src} loaded but did not set window.rrweb.record`);
+        },
+        (err: unknown) =>
+          this.log(
+            `recordings are off for this page: could not load ${src} (blocked by a Content-Security-Policy, offline, or the wrong address)`,
+            err,
+          ),
+      );
+    } catch (err) {
+      this.log('recordings are off for this page: could not start the recorder', err);
     }
-    const block = ['[data-ut-no-track]', '.ut-block', '.recap-private', o.blockSelector].filter(Boolean).join(', ');
+  }
+
+  private beginRecording(record: RrwebRecord, o: RemoteRecordingOptions): void {
+    const block = [EXCLUDE_SELECTOR, o.blockSelector].filter(Boolean).join(', ');
+    const fps = canvasFps(o.canvas);
     // Set before record() runs: rrweb emits the first full snapshot while it starts.
     this.recordFn = record;
-    const stop = record({
-      emit: (e: RrwebEvent) => this.pushDom(e),
-      maskAllInputs: true,
-      blockSelector: block,
-      // Text is replaced with * (same length, so the layout stays): .ut-mask always, plus maskText.
-      maskTextSelector: maskTextSelectorFor(o.maskText),
-      inlineStylesheet: true,
-      recordCanvas: false,
-      collectFonts: false,
-      sampling: { mousemove: 50, scroll: 100, input: 'last', media: 800 },
-      slimDOMOptions: { script: true, comment: true, headFavicon: true, headWhitespace: true, headMetaSocial: true },
-    });
+    let stop: (() => void) | undefined;
+    try {
+      stop = record({
+        emit: (e: RrwebEvent) => this.pushDom(e),
+        maskAllInputs: true,
+        blockSelector: block,
+        // Text is replaced with * (same length, so the layout stays): the mask marker always, plus maskText.
+        maskTextSelector: maskTextSelectorFor(o.maskText),
+        inlineStylesheet: true,
+        recordCanvas: fps > 0,
+        collectFonts: false,
+        sampling: { mousemove: 50, scroll: 100, input: 'last', media: 800, ...(fps > 0 ? { canvas: fps } : {}) },
+        // Canvas frames as compressed pictures (a browser that can't make WebP sends PNG).
+        ...(fps > 0 ? { dataURLOptions: { type: 'image/webp', quality: 0.6 } } : {}),
+        slimDOMOptions: { script: true, comment: true, headFavicon: true, headWhitespace: true, headMetaSocial: true },
+      });
+    } catch (err) {
+      this.recordFn = null;
+      this.log('recordings are off for this page: rrweb could not start', err);
+      return;
+    }
     if (!this.recordFn) {
       stop?.(); // the first snapshot already ended recording (page too large)
       return;
     }
     this.stopRecording = stop ?? null;
-    this.log('recording the page for replay');
+    this.log(fps > 0 ? `recording the page for replay, canvas at ${fps} frames a second` : 'recording the page for replay');
   }
 
   /** Stop recording this session and drop what's buffered. */
@@ -497,9 +661,19 @@ export class RemoteSink {
     this.domBytes = 0;
   }
 
-  private pushDom(e: RrwebEvent): void {
-    if (!this.recordFn) return;
+  private pushDom(event: RrwebEvent): void {
+    if (!this.recordFn || this.recordingBlocked) return;
+    const e = event;
     const n = utf8Bytes(JSON.stringify(e));
+    if (e.type === 2) {
+      this.log(`full snapshot: ${Math.round(n / 1000)} KB`);
+      if (this.config.debug && n > DOM_SNAPSHOT_WARN_BYTES && n <= DOM_EVENT_MAX_BYTES) {
+        console.warn(
+          `[Recap] full snapshot is ${(n / 1e6).toFixed(1)} MB, close to the ${DOM_EVENT_MAX_BYTES / 1e6} MB limit: ` +
+            'above it, recordings stop for the session. Mark large parts data-recap-private, or trim inline images and styles.',
+        );
+      }
+    }
     if (n > DOM_EVENT_MAX_BYTES) {
       // recap_dom can't store a snapshot this big, and the replay is useless without it.
       this.endRecording(`recordings are off for this session: the page is too large to record (${Math.round(n / 1e6)} MB)`);

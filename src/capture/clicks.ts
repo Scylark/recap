@@ -171,7 +171,7 @@ function onDocumentClick(e: MouseEvent): void {
     const hit = e.target as Element | null;
     if (!hit || !_handler || _paused || typeof hit.closest !== 'function') return;
 
-    // Privacy: skip anything inside data-ut-no-track, ut-block or recap-private
+    // Privacy: skip anything inside the privacy marker (data-recap-private, recap-private, or the older data-ut-no-track, ut-block)
     if (isExcluded(hit)) return;
 
     // A tap on an icon or span inside a button is a tap on the button: label, selector and
