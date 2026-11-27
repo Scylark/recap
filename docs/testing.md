@@ -2,16 +2,17 @@
 
 | What | How | Where |
 | --- | --- | --- |
-| SDK logic: sessions, consent, sampling, offline queue, batching, tap labels, start-up buffering, Supabase key headers, install id, screen pictures (once per screen and version, exclusions, skipped if the person moved on) | 17 unit tests | `sdk-react-native/tests/` |
+| SDK logic: sessions, consent, sampling, offline queue, batching, tap labels, start-up buffering, Supabase key headers, install id, screen pictures (once per screen and version, exclusions, skipped if the person moved on), recordings (unchanged frames skipped, pauses for keyboard, private views and excluded screens, frame cap) | 19 unit tests | `sdk-react-native/tests/` |
 | Database: ingest, counters, app isolation, anon can't read, only team members can read, viewers can't delete, admin tools, retention | SQL checks on a real Postgres | `supabase/tests/security.sql` |
 | Analytics and screen pictures: event names, funnel, retention, properties, pictures replace older ones, non-images refused, anon and strangers see nothing | SQL checks on a real Postgres | `supabase/tests/analytics-and-screens.sql` |
+| Recordings: frames stored only for a known session of the same app, non-images refused, anon and strangers can't read, viewers can't delete, frames deleted with their session | SQL checks on a real Postgres | `supabase/tests/recordings.sql` |
 | Analytics numbers: the database functions and the demo's copies give identical results for trends, breakdowns, funnels and retention on 151 sample sessions | 13 checks against a real Postgres | `dashboard/tests/analytics-parity.test.ts` |
 | AI summary built from mobile events | 3 unit tests | `dashboard/tests/` |
-| **End to end**: SDK inside a real Expo app → HTTP → database | Playwright taps through the app as two users on a phone-sized screen, one starting offline; screen pictures are sent and stored too | `examples/expo-test-shop/` |
+| **End to end**: SDK inside a real Expo app → HTTP → database | Playwright taps through the app as two users on a phone-sized screen, one starting offline; screen pictures and recording frames (including a privacy pause on checkout) are sent and stored too | `examples/expo-test-shop/` |
 | **On a phone**: the test shop on a real Android phone in Expo Go, sending to a hosted Supabase project | By hand, 26 Nov 2026: 27 events with correct button names, visible in the dashboard | `docs/try-it-on-your-phone.md` |
 | Dashboard screens | Rendered against the recorded test sessions and sample data (`npm run demo` in `dashboard/`) | `dashboard/src/demo/` |
 
-CI (`.github/workflows/mobile.yml`) runs the first five on every change.
+CI (`.github/workflows/mobile.yml`) runs the first six on every change.
 
 ## Result of the end-to-end run (26 Nov 2026)
 
@@ -30,6 +31,7 @@ and the same run passed again. Its iOS and Android bundles also compile with Her
 ## Not yet covered
 
 - The SDK has run on an Android phone, not yet on an iPhone.
+- Recordings have not yet run on a real phone, so frame size and battery use there are estimates.
 - Screen pictures on a real phone use react-native-view-shot, which isn't available in the browser build,
   so the automated end-to-end test sends a placeholder picture to check the upload and storage path.
   The first real pictures will come from the next phone run.

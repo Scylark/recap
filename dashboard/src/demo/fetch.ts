@@ -168,7 +168,9 @@ export const demoFetch: typeof fetch = async (input, init) => {
           ? (data.members as unknown as Row[])
           : path === 'recap_screenshots'
             ? (data.screenshots as unknown as Row[])
-            : undefined;
+            : path === 'recap_frames'
+              ? (data.frames as unknown as Row[])
+              : undefined;
   if (!table) return json({ message: 'not found' }, {}, 404);
 
   if (method === 'GET' || method === 'HEAD') {

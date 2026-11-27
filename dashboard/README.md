@@ -5,7 +5,8 @@ host) that reads sessions from your own Supabase project.
 
 - **Overview:** sessions, average length, screens per session, and per-screen views, taps and exit rates
 - **Sessions:** every session with its journey, filterable by platform and user id
-- **Session detail:** a **replay** that plays the session back like a recording (screen pictures, taps
+- **Session detail:** a **replay** that plays the session back, using real screen recordings when the app
+  sends them (moments paused for privacy show as hidden) or otherwise screen pictures, taps
   rippling in, repeated taps in red, scrolls, events and time away, with speed and skip-pauses controls),
   a screen-by-screen timeline, tap heatmap per visit, and **Copy AI summary** to paste
   into Claude or ChatGPT for a UX analysis

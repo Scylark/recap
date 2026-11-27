@@ -1,6 +1,6 @@
 // Stand-in for Supabase's data API, for the end-to-end test only.
 // Like Supabase, it checks the anon key, switches to the `anon` Postgres role, and calls the real
-// recap_ingest() and recap_screenshot() SQL functions, so the database's own permission rules are what's being exercised.
+// recap_ingest(), recap_screenshot() and recap_frames() SQL functions, so the database's own permission rules are what's being exercised.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -15,7 +15,7 @@ const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers
 http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
   if (req.url === '/__log') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify(log)); }
-  const rpc = req.method === 'POST' && /^\/rest\/v1\/rpc\/(recap_ingest|recap_screenshot)\b/.exec(req.url);
+  const rpc = req.method === 'POST' && /^\/rest\/v1\/rpc\/(recap_ingest|recap_screenshot|recap_frames)\b/.exec(req.url);
   if (rpc) {
     const fn = rpc[1];
     let body = '';
@@ -30,7 +30,9 @@ http.createServer(async (req, res) => {
       await client.query('commit');
       log.push(fn === 'recap_ingest'
         ? { status: 200, events: r.rows[0].n, session: payload.session.id }
-        : { status: 200, screenshot: payload.screen, bytes: payload.image.length });
+        : fn === 'recap_frames'
+          ? { status: 200, frames: r.rows[0].n }
+          : { status: 200, screenshot: payload.screen, bytes: payload.image.length });
       res.writeHead(200, { ...cors, 'content-type': 'application/json' }); res.end(String(r.rows[0].n));
     } catch (e) {
       await client.query('rollback').catch(() => {});

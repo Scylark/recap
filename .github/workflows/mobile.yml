@@ -47,6 +47,7 @@ jobs:
         run: for f in supabase/migrations/*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/security.sql
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/analytics-and-screens.sql
+      - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/recordings.sql
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - name: Analytics in the database match the demo's numbers

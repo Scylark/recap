@@ -58,13 +58,37 @@ export interface ScreenshotPayload {
  * Takes a picture of the app's root view. RecapProvider builds one from react-native-view-shot's
  * captureRef when you pass it. Returns base64 JPEG data (no data: prefix).
  */
-export type ScreenCapture = () => Promise<string | null>;
+export type ScreenCapture = (opts?: { width?: number; quality?: number }) => Promise<string | null>;
+
+/** A run of recording frames for one session. `image` is null while recording was paused for privacy. */
+export interface FramesPayload {
+  appId: string;
+  sessionId: string;
+  frames: { t: number; image: string | null }[];
+}
+
+export interface RecordingOptions {
+  /** Time between frames. Default 1000 ms. Frames that look the same as the last one are skipped. */
+  intervalMs?: number;
+  /** Share of sessions to record, 0 to 1, on top of `sampleRate`. Default 1. */
+  sampleRate?: number;
+  /** Stop recording a session after this many frames. Default 600 (ten minutes at one a second). */
+  maxFrames?: number;
+  /** Screens never recorded, e.g. ['Checkout', 'Account']. */
+  exclude?: string[];
+  /** Picture width in points. Default 280. */
+  width?: number;
+  /** JPEG quality 0 to 1. Default 0.4. */
+  quality?: number;
+}
 
 /** Where batches go. Supabase and plain HTTP transports are built in; write your own for anything else. */
 export interface Transport {
   send(batch: IngestBatch): Promise<void>;
   /** Optional: store a screen picture. Without it, screenshots are skipped. */
   sendScreenshot?(shot: ScreenshotPayload): Promise<void>;
+  /** Optional: store recording frames. Without it, recordings are skipped. */
+  sendFrames?(frames: FramesPayload): Promise<void>;
 }
 
 /** Async key/value storage. Pass @react-native-async-storage/async-storage, MMKV or similar. */
@@ -109,6 +133,16 @@ export interface RecapConfig {
    * Default false.
    */
   screenshots?: boolean | { exclude?: string[]; delayMs?: number };
+
+  /**
+   * Screen recordings for session replay: a small picture about once a second while the app is open.
+   * Needs `captureRef` on RecapProvider, like screenshots. Off by default.
+   *
+   * Privacy: recording pauses while the keyboard is open, on `exclude` screens, and while any
+   * <RecapPrivate> is on screen. Wrap anything showing personal details (forms, account pages,
+   * messages) in <RecapPrivate>. Paused moments show as "Hidden for privacy" in the replay.
+   */
+  recordings?: boolean | RecordingOptions;
 
   /** Your app's version string, shown in the dashboard. */
   appVersion?: string;

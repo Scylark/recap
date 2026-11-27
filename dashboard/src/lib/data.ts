@@ -166,6 +166,31 @@ export async function screenshotsFor(appId: string, screens: string[]): Promise<
   return out;
 }
 
+export interface Frame {
+  t_ms: number;
+  /** null while recording was paused for privacy. */
+  image: string | null;
+}
+
+/** Recording frames for a session, oldest first. Empty when the app doesn't send recordings. */
+export async function getFrames(sessionId: string): Promise<Frame[]> {
+  const out: Frame[] = [];
+  // Pages of 200 keep each response small (frames are pictures).
+  for (let from = 0; from < 3600; from += 200) {
+    const res = await db()
+      .from('recap_frames')
+      .select('t_ms,image')
+      .eq('session_id', sessionId)
+      .order('t_ms', { ascending: true })
+      .range(from, from + 199);
+    if (res.error) return out; // older databases without the recordings migration
+    const rows = (res.data ?? []) as Frame[];
+    out.push(...rows);
+    if (rows.length < 200) break;
+  }
+  return out;
+}
+
 export interface LabelCount {
   label: string;
   count: number;

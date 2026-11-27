@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Screenshot } from '../lib/data';
+import type { Frame, Screenshot } from '../lib/data';
 import type { EventRow } from '../lib/types';
 
 /**
@@ -16,6 +16,8 @@ interface Props {
   events: EventRow[];
   durationMs: number;
   pictures: Record<string, Screenshot>;
+  /** Recording frames, when the app sends them. Otherwise each screen's picture is shown. */
+  frames?: Frame[];
   aspect?: number;
   describe: (e: EventRow) => string;
 }
@@ -33,7 +35,7 @@ const fmt = (ms: number) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
-export function Replay({ events, durationMs, pictures, aspect = 2.16, describe }: Props) {
+export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.16, describe }: Props) {
   const sorted = useMemo(() => [...events].sort((a, b) => a.t_ms - b.t_ms), [events]);
   const end = Math.max(durationMs, (sorted[sorted.length - 1]?.t_ms ?? 0) + 1500, 1000);
 
@@ -94,7 +96,21 @@ export function Replay({ events, durationMs, pictures, aspect = 2.16, describe }
   const ripples = taps.filter((p) => p.t <= t && t - p.t < RIPPLE_MS);
   const toast = [...past].reverse().find((e) => e.type === 'custom' && t - e.t_ms < 1800);
   const current = [...past].reverse().find((e) => e.type !== 'screen') ?? past[past.length - 1];
-  const picture = pictures[screen];
+  const recorded = frames.length > 0;
+  let frame: Frame | undefined;
+  if (recorded) {
+    // Latest frame at or before t (frames are sorted); before the first one, show the first.
+    let lo = 0;
+    let hi = frames.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (frames[mid]!.t_ms <= t) lo = mid;
+      else hi = mid - 1;
+    }
+    frame = frames[lo];
+  }
+  const hidden = recorded && frame?.image === null;
+  const picture = recorded ? (frame?.image ? { image: frame.image, width: null, height: null } : pictures[screen]) : pictures[screen];
   const width = 280;
   const height = Math.round(width * (picture?.width && picture.height ? picture.height / picture.width : aspect));
 
@@ -122,7 +138,15 @@ export function Replay({ events, durationMs, pictures, aspect = 2.16, describe }
               <small>No picture of this screen yet</small>
             </div>
           )}
+          {hidden && (
+            <div className="replay-hidden">
+              <span>🔒</span>
+              Hidden for privacy
+              <small>Typing or a private screen</small>
+            </div>
+          )}
           <div className="replay-screen-name">{screen}</div>
+          <div className={`replay-mode${recorded ? ' rec' : ''}`}>{recorded ? '● Recording' : 'Screen picture'}</div>
           {scroll && (
             <div className="replay-scroll" title={`Scrolled ${String(scroll.data.depth)}%`}>
               <i style={{ height: `${Math.min(100, Number(scroll.data.depth))}%` }} />

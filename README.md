@@ -46,10 +46,11 @@ review real user sessions in a dashboard they host themselves.
 
 - **SDK** in [`sdk-react-native/`](./sdk-react-native): taps, screens, scroll depth, custom events, offline
   queue, consent and sampling. Never records typed text. Can optionally take one picture of each screen
-  from your test phone, so heatmaps show what was tapped.
+  from your test phone, so heatmaps show what was tapped, and opt-in screen recordings for session replay
+  that pause on private screens and while typing.
 - **Your own database**: a few SQL files in [`supabase/`](./supabase) set up tables and locked-down access in
   a free Supabase project.
-- **Dashboard** in [`dashboard/`](./dashboard): journeys, tap heatmaps over real screens, screen exit rates,
+- **Dashboard** in [`dashboard/`](./dashboard): session replay, journeys, tap heatmaps over real screens, screen exit rates,
   one-click AI session summaries and Mixpanel-style analytics (trends, funnels, retention, breakdowns,
   custom events), deployed to your own Vercel or Netlify.
 

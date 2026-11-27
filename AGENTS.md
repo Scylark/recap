@@ -167,6 +167,29 @@ developer's own test phone, never from real users' screens, which may show their
 owner wants pictures from production builds, ask first, and list screens that show personal data in
 `screenshots: { exclude: ['Account', 'Checkout'] }`.
 
+**Screen recordings for session replay (optional, ask the owner first).** The dashboard's replay works
+without them, using the screen pictures above. For true recordings, add `recordings` to the same config
+(it uses the same `captureRef`):
+
+```tsx
+import { RecapPrivate } from '@recap-ux/react-native';
+
+config={{ ...config, recordings: { sampleRate: 0.1, exclude: ['Account'] } }}
+
+// Wrap anything showing personal details. Recording pauses while it is on screen.
+<RecapPrivate><CheckoutForm /></RecapPrivate>
+```
+
+The SDK takes a small JPEG (about 10 to 25 KB) roughly once a second while the app is open, skips frames
+where nothing changed, and stops after 10 minutes per session. It pauses on its own while the keyboard is
+open, on `exclude` screens and while any `<RecapPrivate>` is mounted; those moments show as "Hidden for
+privacy" in the replay. Before turning it on in production:
+- **Ask** the owner, and find every screen that shows names, addresses, payment details, messages or
+  health data. Wrap those in `<RecapPrivate>` or list them in `exclude`.
+- Use `sampleRate` (e.g. `0.1`) on busy apps: Supabase's free database is 500 MB, and a ten-minute
+  recording is a few MB. Also set up `recap_purge` retention (below).
+- Update the privacy policy and store disclosures (see docs/mobile-privacy.md).
+
 ## Step 4. Make the data readable
 
 These are small edits but they make the dashboard far more useful. Do them for the app's main flows.
@@ -260,18 +283,20 @@ network access. Upload errors are logged when `debug` is on.
 | `maxQueueSize` | `1000` | Offline cap; oldest dropped first |
 | `sessionTimeoutMs` | `1800000` | Background time after which a new session starts |
 | `appVersion` | | Shown in the dashboard; also lets you filter analytics by release |
+| `recordings` | `false` | `true`, or `{ sampleRate?, intervalMs? (1000), maxFrames? (600), exclude?, width? (280), quality? (0.4) }`. Needs `captureRef` |
 | `screenshots` | `false` | `true`, or `{ exclude?: string[], delayMs?: number }`. Needs the `captureRef` prop. Suggest `__DEV__` |
 | `debug` | `false` | Console logging |
 
 Props on `RecapProvider`: `config`, `navigationRef?`, `device?`, `captureRef?` (from react-native-view-shot).
 
 API: `recap.screen(name)`, `recap.track(name, props)`, `recap.setUserId(id | null)`, `recap.optIn()`,
-`recap.optOut()`, `recap.flush()`, `recap.getAnonymousId()`, `recapPress(label, handler)`, `useRecapScreen(name)`, `useRecapScroll()`.
+`recap.optOut()`, `recap.flush()`, `recap.getAnonymousId()`, `<RecapPrivate>`, `useRecapPrivate()`, `recapPress(label, handler)`, `useRecapScreen(name)`, `useRecapScroll()`.
 
 ### Using your own backend instead of Supabase
 
 Set `endpoint: { url: 'https://api.example.com/recap', headers: { Authorization: 'Bearer ...' } }`. Each
 request body is one JSON batch: `{ appId, sdkVersion, session: { id, startedAt, userId, anonymousId, device }, events: [{ type, t, at, screen, data }] }`.
+Recording frames go to `framesUrl` as `{ appId, sessionId, frames: [{ t, image | null }] }`.
 Screen pictures need their own URL: `endpoint: { url, screenshotUrl }` receives
 `{ appId, screen, platform, appVersion, width, height, image }` where `image` is a base64 JPEG data URL.
 Store it however you like. The bundled dashboard reads the Supabase tables, so with a custom backend you
@@ -286,7 +311,7 @@ that) or build your own views.
 - What is and isn't tested yet: `docs/testing.md`
 - Hands-on trial on a phone (for people, not agents): `docs/try-it-on-your-phone.md`
 - Database checks against a scratch Postgres: run `supabase/tests/supabase-shim.sql`, then every file in
-  `supabase/migrations/` in order, then `supabase/tests/security.sql` and `supabase/tests/analytics-and-screens.sql`.
+  `supabase/migrations/` in order, then `supabase/tests/security.sql`, `supabase/tests/analytics-and-screens.sql` and `supabase/tests/recordings.sql`.
 - Analytics parity (database functions vs the demo's copies):
   `cd dashboard && RECAP_TEST_PG=postgres://... TZ=UTC npx vitest run tests/analytics-parity.test.ts` on a scratch database.
 - The web library in `src/` has its own tests: `npm install && npm test` at the root.

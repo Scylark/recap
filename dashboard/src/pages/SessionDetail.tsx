@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Heatmap } from '../components/Heatmap';
 import { Replay } from '../components/Replay';
-import { deleteSession, getEvents, getSession, screenshotFor, screenshotsFor } from '../lib/data';
+import { deleteSession, getEvents, getFrames, getSession, screenshotFor, screenshotsFor } from '../lib/data';
 import { summaryForAI } from '../lib/summary';
 import type { EventRow, SessionRow } from '../lib/types';
 import { formatDateTime, formatDuration, go, sessionSeconds, useAsync } from '../lib/util';
@@ -89,6 +89,7 @@ function Detail({
   );
   const screens = useMemo(() => [...new Set(events.map((e) => e.screen).filter((x): x is string => !!x))], [events]);
   const pictures = useAsync(() => screenshotsFor(session.app_id, screens), [session.app_id, screens.join('|')]);
+  const frames = useAsync(() => getFrames(session.id), [session.id]);
   const points = (visit?.events ?? [])
     .filter((e) => e.type === 'tap')
     .map((e) => ({ nx: Number(e.data.nx ?? 0), ny: Number(e.data.ny ?? 0) }));
@@ -143,6 +144,7 @@ function Detail({
         events={events}
         durationMs={duration * 1000}
         pictures={pictures.data ?? {}}
+        frames={frames.data ?? []}
         describe={describe}
         {...(aspect ? { aspect } : {})}
       />

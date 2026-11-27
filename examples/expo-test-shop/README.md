@@ -2,7 +2,7 @@
 
 A five-screen Expo shop (Home, Product, Basket, Checkout, Confirmation) with the Recap SDK wired in the way
 AGENTS.md describes: React Navigation screen tracking, labelled buttons with `recapPress`, scroll depth with
-`useRecapScroll`, custom events, screen pictures and AsyncStorage for the offline queue.
+`useRecapScroll`, custom events, screen pictures, screen recordings (checkout wrapped in `<RecapPrivate>`) and AsyncStorage for the offline queue.
 
 It has the things real apps have, so the dashboard has something to show: category chips, a sort dropdown,
 a size dropdown that blocks "Add to basket" until you choose, colour chips, quantity steppers, a reviews

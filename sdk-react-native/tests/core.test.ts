@@ -291,4 +291,76 @@ describe('RecapCore', () => {
     r.screen('Home');
     expect(timers).toHaveLength(0);
   });
+
+  it('records frames, skips unchanged ones and pauses for privacy', async () => {
+    const frames: { sessionId: string; frames: { t: number; image: string | null }[] }[] = [];
+    const transport = { ...fakeTransport(), sendFrames: async (f: (typeof frames)[number]) => void frames.push(f) };
+    const r = new RecapCore(deps);
+    await r.init({ appId: 'test', transport, recordings: { exclude: ['Account'] } }, device);
+    let n = 0;
+    const pictures = ['A', 'A', 'B'];
+    r.setScreenCapture(async (opts) => {
+      expect(opts).toEqual({ width: 280, quality: 0.4 });
+      return pictures[n++] ?? 'C';
+    });
+    r.screen('Home');
+    for (const step of [1, 2, 3]) {
+      clock += 1000;
+      await r.recordFrame(); // A, A (skipped: same picture), B
+      void step;
+    }
+    r.setKeyboardOpen(true);
+    clock += 1000;
+    await r.recordFrame(); // paused: one marker
+    clock += 1000;
+    await r.recordFrame(); // still paused: no second marker
+    r.setKeyboardOpen(false);
+    const release = r.holdPrivacy();
+    clock += 1000;
+    await r.recordFrame(); // a private view is on screen: still paused, no new marker
+    release();
+    clock += 1000;
+    await r.recordFrame(); // C
+    r.screen('Account');
+    clock += 1000;
+    await r.recordFrame(); // excluded screen: marker
+    await r.shutdown();
+
+    const all = frames.flatMap((f) => f.frames);
+    expect(all.map((f) => f.image)).toEqual([
+      'data:image/jpeg;base64,A',
+      'data:image/jpeg;base64,B',
+      null,
+      'data:image/jpeg;base64,C',
+      null,
+    ]);
+    expect(all.map((f) => f.t)).toEqual([1000, 3000, 4000, 7000, 8000]);
+    expect(n).toBe(4);
+    // The session's events were uploaded first, so the frames have a session to belong to.
+    expect(transport.batches[0]!.session.id).toBe(frames[0]!.sessionId);
+  });
+
+  it('records no frames unless switched on, and respects maxFrames', async () => {
+    const got: unknown[] = [];
+    const transport = { ...fakeTransport(), sendFrames: async (f: unknown) => void got.push(f) };
+    const off = new RecapCore(deps);
+    await off.init({ appId: 'test', transport }, device);
+    off.setScreenCapture(async () => 'A');
+    off.screen('Home');
+    await off.recordFrame();
+    await off.shutdown();
+    expect(got).toHaveLength(0);
+
+    const capped = new RecapCore(deps);
+    await capped.init({ appId: 'test', transport, recordings: { maxFrames: 2 } }, device);
+    let i = 0;
+    capped.setScreenCapture(async () => `P${i++}`);
+    capped.screen('Home');
+    for (let k = 0; k < 5; k++) {
+      clock += 1000;
+      await capped.recordFrame();
+    }
+    await capped.shutdown();
+    expect((got as { frames: unknown[] }[]).flatMap((f) => f.frames)).toHaveLength(2);
+  });
 });

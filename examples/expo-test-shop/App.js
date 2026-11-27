@@ -3,7 +3,7 @@ import { NavigationContainer, createNavigationContainerRef } from '@react-naviga
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createContext, useContext, useState } from 'react';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import { RecapProvider, recap, recapPress, useRecapScroll } from '@recap-ux/react-native';
+import { RecapPrivate, RecapProvider, recap, recapPress, useRecapScroll } from '@recap-ux/react-native';
 import { captureRef } from 'react-native-view-shot';
 
 const navigationRef = createNavigationContainerRef();
@@ -332,17 +332,20 @@ function Checkout({ navigation }) {
   return (
     <ScrollView contentContainerStyle={s.screen} keyboardShouldPersistTaps="handled">
       <Text style={s.h1}>Checkout</Text>
-      <Field label="Full name" testID="name" value={form.name} onChangeText={set('name')} placeholder="Alex Smith" error={errors.name} />
-      <Field label="Email" testID="email" value={form.email} onChangeText={set('email')} placeholder="you@example.com" keyboardType="email-address" autoCapitalize="none" error={errors.email} />
-      <Field label="Postcode" testID="postcode" value={form.postcode} onChangeText={set('postcode')} placeholder="SW1A 1AA" autoCapitalize="characters" error={errors.postcode} />
-      <Dropdown
-        label="Delivery"
-        testID="delivery"
-        value={delivery}
-        onChange={setDelivery}
-        options={DELIVERY.map((d) => ({ value: d.id, label: `${d.label}${d.price ? ` (+${money(d.price)})` : ' (free)'}` }))}
-      />
-      {errors.delivery && <Text style={s.error}>{errors.delivery}</Text>}
+      {/* Recordings pause while this is on screen, so names and addresses are never captured. */}
+      <RecapPrivate>
+        <Field label="Full name" testID="name" value={form.name} onChangeText={set('name')} placeholder="Alex Smith" error={errors.name} />
+        <Field label="Email" testID="email" value={form.email} onChangeText={set('email')} placeholder="you@example.com" keyboardType="email-address" autoCapitalize="none" error={errors.email} />
+        <Field label="Postcode" testID="postcode" value={form.postcode} onChangeText={set('postcode')} placeholder="SW1A 1AA" autoCapitalize="characters" error={errors.postcode} />
+        <Dropdown
+          label="Delivery"
+          testID="delivery"
+          value={delivery}
+          onChange={setDelivery}
+          options={DELIVERY.map((d) => ({ value: d.id, label: `${d.label}${d.price ? ` (+${money(d.price)})` : ' (free)'}` }))}
+        />
+        {errors.delivery && <Text style={s.error}>{errors.delivery}</Text>}
+      </RecapPrivate>
 
       <View style={s.toggleRow}>
         <Text style={s.p}>Gift wrap (+£3)</Text>
@@ -410,7 +413,7 @@ export default function App() {
       navigationRef={navigationRef}
       captureRef={capture}
       device={{ model: 'Playwright phone' }}
-      config={{ appId: 'test-shop', supabase: { url: cfg.url, anonKey: cfg.anonKey }, storage: AsyncStorage, appVersion: '1.1.0', flushIntervalMs: 2000, debug: true, screenshots: true }}
+      config={{ appId: 'test-shop', supabase: { url: cfg.url, anonKey: cfg.anonKey }, storage: AsyncStorage, appVersion: '1.1.0', flushIntervalMs: 2000, debug: true, screenshots: true, recordings: true }}
     >
       <BasketContext.Provider value={basket}>
         <NavigationContainer ref={navigationRef}>

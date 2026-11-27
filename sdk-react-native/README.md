@@ -18,6 +18,7 @@ Supabase project and is viewed in a dashboard **you** deploy. No Recap account, 
 - Scroll depth, foreground and background, custom events
 - Offline queue, batching, sampling, consent and opt-out
 - Never records typed text
+- Optional screen recordings for session replay, paused while typing and on `<RecapPrivate>` views
 - Optional screen pictures for heatmaps (one per screen per app version, via `react-native-view-shot`; we suggest `screenshots: __DEV__`)
 - Pure TypeScript, no native modules of its own, iOS and Android
 

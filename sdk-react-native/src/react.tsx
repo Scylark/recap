@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, type ReactNo
 import {
   AppState,
   Dimensions,
+  Keyboard,
   Platform,
   View,
   type GestureResponderEvent,
@@ -92,12 +93,32 @@ export function RecapProvider({ config, children, navigationRef, device, capture
   const root = useRef<View>(null);
 
   useEffect(() => {
-    if (!captureRef || !config.screenshots) return;
-    recap.setScreenCapture(async () =>
-      root.current ? captureRef(root.current, { format: 'jpg', quality: 0.6, width: 360, result: 'base64' }) : null,
+    if (!captureRef || (!config.screenshots && !config.recordings)) return;
+    recap.setScreenCapture(async (opts) =>
+      root.current
+        ? captureRef(root.current, {
+            format: 'jpg',
+            quality: opts?.quality ?? 0.6,
+            width: opts?.width ?? 360,
+            result: 'base64',
+          })
+        : null,
     );
     return () => recap.setScreenCapture(null);
-  }, [captureRef, config.screenshots]);
+  }, [captureRef, config.screenshots, config.recordings]);
+
+  // Recordings pause while the keyboard is open, so nothing being typed is ever captured.
+  useEffect(() => {
+    if (!config.recordings) return;
+    const show = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () =>
+      recap.setKeyboardOpen(true),
+    );
+    const hide = Keyboard.addListener('keyboardDidHide', () => recap.setKeyboardOpen(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, [config.recordings]);
 
   useEffect(() => {
     void recap.init(config, detectDevice(device ?? {}));
@@ -171,6 +192,21 @@ export function RecapProvider({ config, children, navigationRef, device, capture
       </View>
     </RecapContext.Provider>
   );
+}
+
+/**
+ * Recording pauses while this is on screen. Wrap anything that shows personal details:
+ *   <RecapPrivate><CheckoutForm /></RecapPrivate>
+ * It renders its children unchanged.
+ */
+export function RecapPrivate({ children }: { children?: ReactNode }) {
+  useRecapPrivate();
+  return <>{children}</>;
+}
+
+/** Hook form of <RecapPrivate>: recording pauses while the calling component is mounted. */
+export function useRecapPrivate(active = true): void {
+  useEffect(() => (active ? recap.holdPrivacy() : undefined), [active]);
 }
 
 export function useRecap(): RecapCore {

@@ -4,10 +4,12 @@
 import { endpointTransport, supabaseTransport } from './transports';
 import type {
   DeviceInfo,
+  FramesPayload,
   IngestBatch,
   RecapConfig,
   RecapEvent,
   RecapEventType,
+  RecordingOptions,
   ScreenCapture,
   SessionInfo,
   StorageAdapter,
@@ -15,7 +17,7 @@ import type {
   Transport,
 } from './types';
 
-export const SDK_VERSION = '0.2.0';
+export const SDK_VERSION = '0.3.0';
 
 const KEY_QUEUE = 'recap:queue';
 const KEY_CONSENT = 'recap:consent';
@@ -89,6 +91,19 @@ export class RecapCore {
   private shots = new Set<string>();
   private shooting = new Set<string>();
 
+  // Recording (session replay frames)
+  private recTimer: unknown = null;
+  private recSampled = false;
+  private recFrames = 0;
+  private recBusy = false;
+  private recLast: string | null | undefined = undefined;
+  private recBuffer: { sessionId: string; t: number; image: string | null }[] = [];
+  private recSending = false;
+  private privacyHolds = 0;
+  private keyboardOpen = false;
+  /** Sessions the server already knows about, so their frames have somewhere to go. */
+  private uploadedSessions = new Set<string>();
+
   private readonly now: () => number;
   private readonly random: () => number;
   private readonly setIntervalFn: (fn: () => void, ms: number) => unknown;
@@ -158,13 +173,20 @@ export class RecapCore {
     if (this.isRecording()) for (const e of early) this.enqueue(e);
 
     if (this.timer) this.clearIntervalFn(this.timer);
-    this.timer = this.setIntervalFn(() => void this.flush(), config.flushIntervalMs ?? 10_000);
+    this.timer = this.setIntervalFn(
+      () => void this.flush().then(() => this.sendFrames()),
+      config.flushIntervalMs ?? 10_000,
+    );
+    this.startRecordingTimer();
   }
 
   async shutdown(): Promise<void> {
     if (this.timer) this.clearIntervalFn(this.timer);
     this.timer = null;
+    if (this.recTimer) this.clearIntervalFn(this.recTimer);
+    this.recTimer = null;
     await this.flush();
+    await this.sendFrames();
   }
 
   // ---------------------------------------------------------------- consent
@@ -187,6 +209,7 @@ export class RecapCore {
   async optOut(): Promise<void> {
     this.consent = 'denied';
     this.queue = [];
+    this.recBuffer = [];
     // Forget the install id too, so a later opt-in can't be linked to earlier sessions.
     this.anonymousId = uuid(this.random);
     if (this.session) this.session = { ...this.session, anonymousId: this.anonymousId };
@@ -230,6 +253,115 @@ export class RecapCore {
   setScreenCapture(capture: ScreenCapture | null): void {
     this.capture = capture;
     if (capture && this.currentScreen) this.maybeScreenshot(this.currentScreen);
+  }
+
+  // ---------------------------------------------------------------- recordings
+
+  private get recOptions(): RecordingOptions | null {
+    const r = this.config?.recordings;
+    if (!r) return null;
+    return r === true ? {} : r;
+  }
+
+  private startRecordingTimer(): void {
+    const opt = this.recOptions;
+    if (this.recTimer) this.clearIntervalFn(this.recTimer);
+    this.recTimer = null;
+    if (!opt) return;
+    this.recTimer = this.setIntervalFn(() => void this.recordFrame(), Math.max(250, opt.intervalMs ?? 1000));
+  }
+
+  /**
+   * Pause recording frames while something private is on screen. Returns a function that ends
+   * the pause. <RecapPrivate> does this for you.
+   */
+  holdPrivacy(): () => void {
+    this.privacyHolds++;
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      this.privacyHolds = Math.max(0, this.privacyHolds - 1);
+    };
+  }
+
+  /** RecapProvider calls this as the keyboard opens and closes; recording pauses while typing. */
+  setKeyboardOpen(open: boolean): void {
+    this.keyboardOpen = open;
+  }
+
+  /** Why recording is paused right now, or null if it isn't. */
+  private recordingPausedFor(): string | null {
+    const opt = this.recOptions;
+    if (this.keyboardOpen) return 'keyboard';
+    if (this.privacyHolds > 0) return 'private';
+    if (opt?.exclude && this.currentScreen && opt.exclude.includes(this.currentScreen)) return 'excluded';
+    return null;
+  }
+
+  /** Takes one frame. Runs on a timer; exposed for tests. */
+  async recordFrame(): Promise<void> {
+    const opt = this.recOptions;
+    if (!opt || !this.capture || !this.transport?.sendFrames || !this.session) return;
+    if (!this.isRecording() || !this.recSampled || this.backgroundedAt !== null || this.recBusy) return;
+    if (this.recFrames >= (opt.maxFrames ?? 600)) return;
+    const sessionId = this.session.id;
+    const t = Math.max(0, this.now() - this.sessionStartMs);
+    if (this.recordingPausedFor()) {
+      // One marker per pause, so the replay can say "Hidden for privacy".
+      if (this.recLast !== null) this.pushFrame(sessionId, t, null);
+      return;
+    }
+    this.recBusy = true;
+    try {
+      const raw = await this.capture({ width: opt.width ?? 280, quality: opt.quality ?? 0.4 });
+      // Something private may have appeared while the picture was being taken.
+      if (!raw || this.recordingPausedFor() || this.session?.id !== sessionId) return;
+      const image = raw.startsWith('data:') ? raw : `data:image/jpeg;base64,${raw}`;
+      if (image === this.recLast) return; // nothing changed on screen
+      this.pushFrame(sessionId, t, image);
+    } catch (err) {
+      this.log('recording frame failed', err);
+    } finally {
+      this.recBusy = false;
+    }
+  }
+
+  private pushFrame(sessionId: string, t: number, image: string | null): void {
+    this.recLast = image;
+    this.recFrames++;
+    this.recBuffer.push({ sessionId, t, image });
+    // Frames are big, so they are never saved to the phone; keep only a short backlog while offline.
+    if (this.recBuffer.length > 30) this.recBuffer.splice(0, this.recBuffer.length - 30);
+    if (this.recBuffer.length >= 5) void this.sendFrames();
+  }
+
+  private async sendFrames(): Promise<void> {
+    const transport = this.transport;
+    if (this.recSending || !transport?.sendFrames || this.recBuffer.length === 0 || this.consent === 'denied') return;
+    this.recSending = true;
+    try {
+      // The session has to reach the database before its frames can.
+      if (this.recBuffer.some((f) => !this.uploadedSessions.has(f.sessionId))) await this.flush();
+      while (this.recBuffer.length) {
+        const sessionId = this.recBuffer[0]!.sessionId;
+        if (!this.uploadedSessions.has(sessionId)) break;
+        const batch = this.recBuffer.filter((f) => f.sessionId === sessionId).slice(0, 10);
+        const payload: FramesPayload = {
+          appId: this.config!.appId,
+          sessionId,
+          frames: batch.map(({ t, image }) => ({ t, image })),
+        };
+        await transport.sendFrames(payload);
+        const sent = new Set(batch);
+        this.recBuffer = this.recBuffer.filter((f) => !sent.has(f));
+        this.log(`uploaded ${batch.length} recording frames`);
+      }
+    } catch (err) {
+      this.log('frame upload failed; will retry', err);
+    } finally {
+      this.recSending = false;
+    }
   }
 
   private maybeScreenshot(name: string): void {
@@ -328,7 +460,7 @@ export class RecapCore {
       if (this.backgroundedAt !== null) return;
       this.backgroundedAt = t;
       this.record('app_state', { state: 'background' });
-      void this.flush();
+      void this.flush().then(() => this.sendFrames());
       return;
     }
     if (state === 'active' && this.backgroundedAt !== null) {
@@ -384,6 +516,7 @@ export class RecapCore {
           events: batch.map(({ sessionId: _s, ...e }) => e),
         };
         await transport.send(payload);
+        this.uploadedSessions.add(sessionId);
         const sent = new Set(batch);
         this.queue = this.queue.filter((e) => !sent.has(e));
         this.log(`uploaded ${batch.length} events`);
@@ -407,6 +540,10 @@ export class RecapCore {
     this.sessionStartMs = this.now();
     const rate = this.config?.sampleRate ?? 1;
     this.sampled = rate >= 1 || this.random() < rate;
+    const recRate = this.recOptions?.sampleRate ?? 1;
+    this.recSampled = recRate >= 1 || this.random() < recRate;
+    this.recFrames = 0;
+    this.recLast = undefined;
     this.currentScreen = null;
     this.scrollMax.clear();
     this.pendingLabel = null;

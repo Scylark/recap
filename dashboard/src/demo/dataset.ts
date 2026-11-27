@@ -10,6 +10,46 @@ export interface Dataset {
   events: EventRow[];
   members: Member[];
   screenshots: ScreenshotRow[];
+  frames: FrameRow[];
+}
+
+export interface FrameRow {
+  session_id: string;
+  app_id: string;
+  t_ms: number;
+  image: string | null;
+}
+
+/** Stand-in recordings for the sample app: a frame per screen and per press, with checkout hidden for privacy. */
+function demoFrames(sessions: SessionRow[], events: EventRow[]): FrameRow[] {
+  const out: FrameRow[] = [];
+  const cache = new Map<string, string>();
+  const pic = (screen: string, pressed: string | null = null) => {
+    const k = screen + '|' + (pressed ?? '');
+    if (!cache.has(k)) cache.set(k, wireframe(screen, pressed));
+    return cache.get(k)!;
+  };
+  const bySession = new Map<string, EventRow[]>();
+  for (const e of events) (bySession.get(e.session_id) ?? bySession.set(e.session_id, []).get(e.session_id)!).push(e);
+  for (const s of sessions) {
+    if (s.app_id !== 'demo-shop') continue;
+    let last: string | null | undefined;
+    const add = (t: number, image: string | null) => {
+      if (image === last) return;
+      last = image;
+      out.push({ session_id: s.id, app_id: s.app_id, t_ms: t, image });
+    };
+    for (const e of (bySession.get(s.id) ?? []).sort((a, b) => a.t_ms - b.t_ms)) {
+      const screen = e.screen ?? 'Home';
+      const hidden = screen === 'Checkout';
+      if (e.type === 'screen') add(e.t_ms, hidden ? null : pic(screen));
+      else if (e.type === 'tap' && !hidden) {
+        add(e.t_ms, pic(screen, (e.data.label as string | null) ?? null));
+        add(e.t_ms + 250, pic(screen));
+      }
+    }
+  }
+  return out;
 }
 
 export interface ScreenshotRow {
@@ -181,6 +221,7 @@ export function buildDataset(now = Date.now()): Dataset {
       { email: 'demo@example.com', role: 'admin', created_at: new Date(now - 5 * 86_400_000).toISOString() },
       { email: 'design@example.com', role: 'viewer', created_at: new Date(now - 86_400_000).toISOString() },
     ],
+    frames: demoFrames(g.sessions, g.events),
     screenshots: Object.keys(SCREENS).map((screen) => ({
       app_id: 'demo-shop',
       screen,
@@ -195,7 +236,7 @@ export function buildDataset(now = Date.now()): Dataset {
 }
 
 /** A simple drawn stand-in for a real screen picture, built from the demo screen's buttons. */
-function wireframe(screen: string): string {
+function wireframe(screen: string, pressed: string | null = null): string {
   const W = 393;
   const H = 852;
   const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
@@ -210,8 +251,9 @@ function wireframe(screen: string): string {
     const bw = b.label ? Math.min(W - 48, 60 + b.label.length * 11) : 150;
     const bh = b.label ? 52 : 110;
     const primary = !!b.to;
+    const down = pressed != null && b.label === pressed;
     parts.push(
-      `<rect x="${cx - bw / 2}" y="${cy - bh / 2}" width="${bw}" height="${bh}" rx="12" fill="${primary ? '#2f6fde' : '#ffffff'}" stroke="#d5d9e0"/>`,
+      `<rect x="${cx - bw / 2}" y="${cy - bh / 2}" width="${bw}" height="${bh}" rx="12" fill="${down ? (primary ? '#1d4fa8' : '#e2e8f0') : primary ? '#2f6fde' : '#ffffff'}" stroke="#d5d9e0"/>`,
     );
     parts.push(
       `<text x="${cx}" y="${cy + 6}" text-anchor="middle" font-family="system-ui,sans-serif" font-size="17" fill="${primary ? '#ffffff' : '#4a5263'}">${esc(b.label ?? 'Banner')}</text>`,
