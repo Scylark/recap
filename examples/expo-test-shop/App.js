@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createContext, useContext, useState } from 'react';
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { createContext, useContext, useEffect, useState } from 'react';
+import { BackHandler, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { RecapPrivate, RecapProvider, recap, recapPress, useRecapScroll } from '@recap-ux/react-native';
 import { captureRef } from 'react-native-view-shot';
 
@@ -49,38 +49,69 @@ function Button({ label, onPress, testID, variant = 'primary', disabled }) {
   );
 }
 
+/**
+ * Dropdown sheets are drawn inside the app's own view rather than in a React Native <Modal>.
+ * A Modal opens a separate native window, which screen recordings can't see, so the replay
+ * would show the page underneath instead of the open menu.
+ */
+const SheetContext = createContext(() => {});
+
+function SheetHost({ children }) {
+  const [sheet, setSheet] = useState(null);
+  const close = () => setSheet(null);
+  useEffect(() => {
+    if (!sheet) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      close();
+      return true;
+    });
+    return () => sub.remove();
+  }, [sheet]);
+  return (
+    <SheetContext.Provider value={setSheet}>
+      <View style={{ flex: 1 }}>
+        {children}
+        {sheet ? (
+          <Pressable style={[StyleSheet.absoluteFill, s.backdrop]} onPress={recapPress(`Close ${sheet.label}`, close)}>
+            <Pressable style={s.sheet} onPress={() => {}}>
+              <Text style={s.sheetTitle}>{sheet.label}</Text>
+              {sheet.options.map((o) => (
+                <Pressable
+                  key={o.value}
+                  testID={`${sheet.testID}-${o.value}`}
+                  onPress={recapPress(`${sheet.label}: ${o.label}`, () => {
+                    sheet.onChange(o.value);
+                    close();
+                  })}
+                  style={[s.option, o.value === sheet.value && s.optionOn]}
+                >
+                  <Text style={s.optionText}>{o.label}</Text>
+                  {o.value === sheet.value && <Text style={s.tick}>✓</Text>}
+                </Pressable>
+              ))}
+            </Pressable>
+          </Pressable>
+        ) : null}
+      </View>
+    </SheetContext.Provider>
+  );
+}
+
 /** A tap-to-open dropdown. Each option is a labelled tap, so the dashboard shows which ones people pick. */
 function Dropdown({ label, value, options, onChange, testID, placeholder = 'Choose…' }) {
-  const [open, setOpen] = useState(false);
+  const openSheet = useContext(SheetContext);
   const current = options.find((o) => o.value === value);
   return (
     <View style={{ marginTop: 12 }}>
       <Text style={s.label}>{label}</Text>
-      <Pressable testID={testID} onPress={recapPress(`Open ${label}`, () => setOpen(true))} style={s.select}>
+      <Pressable
+        testID={testID}
+        onPress={recapPress(`Open ${label}`, () => openSheet({ label, value, options, onChange, testID }))}
+        style={s.select}
+      >
         <Text style={current ? s.selectText : s.placeholder}>{current ? current.label : placeholder}</Text>
         <Text style={s.chevron}>▾</Text>
       </Pressable>
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={s.backdrop} onPress={recapPress(`Close ${label}`, () => setOpen(false))}>
-          <View style={s.sheet}>
-            <Text style={s.sheetTitle}>{label}</Text>
-            {options.map((o) => (
-              <Pressable
-                key={o.value}
-                testID={`${testID}-${o.value}`}
-                onPress={recapPress(`${label}: ${o.label}`, () => {
-                  onChange(o.value);
-                  setOpen(false);
-                })}
-                style={[s.option, o.value === value && s.optionOn]}
-              >
-                <Text style={s.optionText}>{o.label}</Text>
-                {o.value === value && <Text style={s.tick}>✓</Text>}
-              </Pressable>
-            ))}
-          </View>
-        </Pressable>
-      </Modal>
     </View>
   );
 }
@@ -421,15 +452,17 @@ export default function App() {
       config={{ appId: 'test-shop', supabase: { url: cfg.url, anonKey: cfg.anonKey }, storage: AsyncStorage, appVersion: '1.1.0', flushIntervalMs: 2000, debug: true, screenshots: true, recordings: true }}
     >
       <BasketContext.Provider value={basket}>
-        <NavigationContainer ref={navigationRef}>
-          <Stack.Navigator screenOptions={{ headerTintColor: '#0e7490' }}>
-            <Stack.Screen name="Home" component={Home} options={{ title: 'Test Shop' }} />
-            <Stack.Screen name="Product" component={Product} />
-            <Stack.Screen name="Basket" component={Basket} />
-            <Stack.Screen name="Checkout" component={Checkout} />
-            <Stack.Screen name="Confirmation" component={Confirmation} options={{ headerBackVisible: false }} />
-          </Stack.Navigator>
-        </NavigationContainer>
+        <SheetHost>
+          <NavigationContainer ref={navigationRef}>
+            <Stack.Navigator screenOptions={{ headerTintColor: '#0e7490' }}>
+              <Stack.Screen name="Home" component={Home} options={{ title: 'Test Shop' }} />
+              <Stack.Screen name="Product" component={Product} />
+              <Stack.Screen name="Basket" component={Basket} />
+              <Stack.Screen name="Checkout" component={Checkout} />
+              <Stack.Screen name="Confirmation" component={Confirmation} options={{ headerBackVisible: false }} />
+            </Stack.Navigator>
+          </NavigationContainer>
+        </SheetHost>
       </BasketContext.Provider>
     </RecapProvider>
   );

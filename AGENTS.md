@@ -189,6 +189,11 @@ privacy" in the replay. Before turning it on in production:
 - Use `sampleRate` (e.g. `0.1`) on busy apps: Supabase's free database is 500 MB, and a ten-minute
   recording is a few MB. Also set up `recap_purge` retention (below).
 - Update the privacy policy and store disclosures (see docs/mobile-privacy.md).
+- Check how the app shows menus, pickers and bottom sheets. A React Native `<Modal>` (and libraries
+  built on it) opens a separate native window that recordings and screen pictures can't see, so the
+  replay shows the page underneath with the taps but not the open menu. Where it matters, draw the
+  sheet inside the app's own view instead (an absolutely positioned overlay near the root, as the
+  test shop's `SheetHost` does).
 
 ## Step 4. Make the data readable
 
