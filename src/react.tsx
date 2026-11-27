@@ -17,21 +17,10 @@ export interface RecapProps extends RecapConfig {
  * <Recap showPanel sessionName="participant-01" />
  * ```
  */
-export function RecapComponent({
-  sessionName,
-  showPanel,
-  endpoint,
-  shortcut,
-  stripQueryParams,
-}: RecapProps): null {
+export function RecapComponent({ onExport: _onExport, ...config }: RecapProps): null {
   useEffect(() => {
-    Recap.init({
-      ...(sessionName !== undefined ? { sessionName } : {}),
-      ...(showPanel !== undefined ? { showPanel } : {}),
-      ...(endpoint !== undefined ? { endpoint } : {}),
-      ...(shortcut !== undefined ? { shortcut } : {}),
-      ...(stripQueryParams !== undefined ? { stripQueryParams } : {}),
-    });
+    // Every RecapConfig setting passes through (panel, labels, screenName, requireConsent, supabase…).
+    Recap.init(config);
 
     return () => {
       Recap.destroy();

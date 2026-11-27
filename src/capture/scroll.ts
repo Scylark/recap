@@ -2,7 +2,7 @@
 
 import type { ScrollEvent } from '../types.js';
 import { getSessionId, getTimestamp } from './session.js';
-import { sanitizeUrl } from '../privacy/sanitize.js';
+import { pageName, isExcluded } from '../privacy/sanitize.js';
 
 type ScrollHandler = (event: ScrollEvent) => void;
 
@@ -40,13 +40,16 @@ function getScrollDepth(): number {
 
 function emitScroll(depth: number): void {
   if (!_handler || _paused) return;
+  // A whole page marked private (data-ut-no-track, ut-block or recap-private on <html> or <body>):
+  // its scrolling isn't counted either.
+  if (document.body && isExcluded(document.body)) return;
   _maxDepth = Math.max(_maxDepth, depth);
 
   const event: ScrollEvent = {
     sessionId: getSessionId(),
     timestamp: getTimestamp(),
     type: 'scroll',
-    url: sanitizeUrl(location.href, _stripQuery),
+    url: pageName(location.href, _stripQuery),
     viewport: { width: window.innerWidth, height: window.innerHeight },
     depth,
     maxDepth: _maxDepth,

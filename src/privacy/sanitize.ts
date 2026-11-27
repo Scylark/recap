@@ -19,78 +19,163 @@ export function sanitizeUrl(rawUrl: string, stripQuery = true): string {
   }
 }
 
+/** Elements (and everything inside them) that are never tracked: no taps, no recordings. */
+export const EXCLUDE_SELECTOR = '[data-ut-no-track], .ut-block, .recap-private';
+
 /**
- * Return true if an element should be completely excluded from tracking.
- * Elements with data-ut-no-track or class ut-block are excluded.
+ * Return true if an element should be completely excluded from tracking: it, or an element around
+ * it, has data-ut-no-track, class ut-block or class recap-private.
  */
 export function isExcluded(el: Element): boolean {
-  if (el.hasAttribute('data-ut-no-track')) return true;
-  if (el.classList.contains('ut-block')) return true;
-  // Check ancestors
-  let parent = el.parentElement;
-  while (parent) {
-    if (parent.hasAttribute('data-ut-no-track')) return true;
-    if (parent.classList.contains('ut-block')) return true;
-    parent = parent.parentElement;
-  }
-  return false;
+  return el.closest(EXCLUDE_SELECTOR) !== null;
 }
 
 /**
- * Return true if an element's text content should be masked.
+ * Return true if an element's text should never be used: it, or an element around it, has class
+ * ut-mask.
  */
 export function isMasked(el: Element): boolean {
-  if (el.classList.contains('ut-mask')) return true;
-  let parent = el.parentElement;
-  while (parent) {
-    if (parent.classList.contains('ut-mask')) return true;
-    parent = parent.parentElement;
-  }
-  return false;
+  return el.closest('.ut-mask') !== null;
+}
+
+// --- Labels ---
+
+/**
+ * Where tap labels may come from.
+ * - `'text'`: also the element's visible text (first 50 characters).
+ * - `'attributes'`: only aria-label, aria-labelledby, title, alt and placeholder, never visible text.
+ * - `'none'`: only labels you write yourself with data-ut-label.
+ * data-ut-label is always used, in every mode and inside ut-mask: it is the developer's own words.
+ */
+export type LabelMode = 'none' | 'attributes' | 'text';
+
+let _labelMode: LabelMode = 'text';
+
+export function setLabelMode(mode: LabelMode): void {
+  _labelMode = mode;
+}
+
+export function getLabelMode(): LabelMode {
+  return _labelMode;
+}
+
+/**
+ * The element a tap was really aimed at: the closest button, link, form control, element with a
+ * role a person can activate, or element with data-ut-label. A tap on an icon inside a button is
+ * a tap on the button. Falls back to the element itself.
+ */
+export const INTERACTIVE_SELECTOR = [
+  '[data-ut-label]',
+  'a[href]',
+  'button',
+  'input',
+  'select',
+  'textarea',
+  'label',
+  'summary',
+  'option',
+  '[role="button"]',
+  '[role="link"]',
+  '[role="menuitem"]',
+  '[role="menuitemcheckbox"]',
+  '[role="menuitemradio"]',
+  '[role="tab"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+  '[role="switch"]',
+  '[role="option"]',
+  '[role="treeitem"]',
+  '[onclick]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
+export function interactiveTarget(el: Element): Element {
+  const hit = el.closest(INTERACTIVE_SELECTOR);
+  return hit && hit !== document.documentElement && hit !== document.body ? hit : el;
+}
+
+function textOf(el: Element): string {
+  const htmlEl = el as HTMLElement;
+  // innerText not available in all environments (e.g. jsdom); fall back to textContent
+  return (htmlEl.innerText ?? htmlEl.textContent ?? '').trim();
 }
 
 /**
  * Extract the best human-readable label for a clicked element.
  * Priority: data-ut-label > aria-label > aria-labelledby > title > alt >
- *           innerText (50 chars) > placeholder > "Unlabelled {tagName}"
+ *           visible text (50 chars, `'text'` mode only) > placeholder.
+ * Inside ut-mask, and in `'none'` mode, only data-ut-label is used.
  */
-export function extractLabel(el: Element): string | null {
-  // 1. Explicit label
+export function extractLabel(el: Element, mode: LabelMode = _labelMode): string | null {
+  // 1. Explicit label: the developer's own words, always allowed.
   const utLabel = el.getAttribute('data-ut-label');
   if (utLabel) return utLabel.trim();
 
+  if (mode === 'none' || isMasked(el)) return null;
+
   // 2. aria-label
   const ariaLabel = el.getAttribute('aria-label');
-  if (ariaLabel) return ariaLabel.trim();
+  if (ariaLabel?.trim()) return ariaLabel.trim();
 
-  // 3. aria-labelledby
+  // 3. aria-labelledby: one or more ids. Skips labels that are masked or private.
   const labelledBy = el.getAttribute('aria-labelledby');
   if (labelledBy) {
-    const ref = document.getElementById(labelledBy);
-    if (ref?.textContent) return ref.textContent.trim().slice(0, 80);
+    const parts = labelledBy
+      .split(/\s+/)
+      .map((id) => (id ? document.getElementById(id) : null))
+      .filter((ref): ref is HTMLElement => !!ref && !isMasked(ref) && !isExcluded(ref))
+      .map((ref) => textOf(ref))
+      .filter(Boolean);
+    if (parts.length) return parts.join(' ').slice(0, 80);
   }
 
   // 4. title
   const title = el.getAttribute('title');
-  if (title) return title.trim();
+  if (title?.trim()) return title.trim();
 
   // 5. alt (images)
   const alt = el.getAttribute('alt');
-  if (alt) return alt.trim();
+  if (alt?.trim()) return alt.trim();
 
-  // 6. innerText / textContent (only if not masked, truncated to 50 chars)
-  if (!isMasked(el)) {
-    const htmlEl = el as HTMLElement;
-    // innerText not available in all environments (e.g. jsdom); fall back to textContent
-    const text = (htmlEl.innerText ?? htmlEl.textContent ?? '').trim();
-    if (text.length > 0) return text.slice(0, 50);
+  // 6. Visible text, truncated to 50 chars
+  if (mode === 'text') {
+    const t = textOf(el);
+    if (t.length > 0) return t.slice(0, 50);
   }
 
   // 7. placeholder
   const placeholder = el.getAttribute('placeholder');
-  if (placeholder) return placeholder.trim();
+  if (placeholder?.trim()) return placeholder.trim();
 
   return null;
+}
+
+// --- Screen names ---
+
+/** Turns a page path into the name a screen is counted under. */
+export type ScreenNamer = (path: string) => string | null | undefined;
+
+let _screenNamer: ScreenNamer | null = null;
+
+export function setScreenNamer(fn: ScreenNamer | null | undefined): void {
+  _screenNamer = fn ?? null;
+}
+
+/**
+ * The name a page is counted under: its path (and query string, if kept), passed through the app's
+ * screenName hook when it has one. The hook's answer is used when it is a non-empty string;
+ * otherwise, or if it throws, the path is used.
+ */
+export function pageName(rawUrl: string, stripQuery = true): string {
+  const path = sanitizeUrl(rawUrl, stripQuery);
+  if (!_screenNamer) return path;
+  try {
+    const named = _screenNamer(path);
+    return typeof named === 'string' && named.trim() ? named.trim() : path;
+  } catch (err) {
+    console.error('[Recap] screenName threw; using the path:', err);
+    return path;
+  }
 }
 
 /**
@@ -109,6 +194,7 @@ export function nearestHeading(el: Element): string | null {
     while (sib && steps < 20) {
       steps++;
       if (headings.has(sib.tagName)) {
+        if (isMasked(sib) || isExcluded(sib)) return null;
         const htmlSib = sib as HTMLElement;
         const text = (htmlSib.innerText ?? htmlSib.textContent ?? '').trim();
         return text.slice(0, 80) || null;

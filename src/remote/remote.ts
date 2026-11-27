@@ -7,7 +7,14 @@
 import type { AnyEvent } from '../types.js';
 import { getSessionId } from '../capture/session.js';
 
-export const REMOTE_SDK_VERSION = 'web-0.1.0';
+export const REMOTE_SDK_VERSION = 'web-0.2.0';
+
+/** The rrweb maskTextSelector for a recordings.maskText setting. `.ut-mask` text is always masked. */
+export function maskTextSelectorFor(maskText: boolean | string | undefined): string {
+  if (maskText === true) return '*';
+  const extra = typeof maskText === 'string' ? maskText.trim() : '';
+  return extra ? `.ut-mask, ${extra}` : '.ut-mask';
+}
 
 /** rrweb's `record` function. Pass `import { record } from 'rrweb'`, or load rrweb with a script tag. */
 export type RrwebRecord = ((options: {
@@ -31,6 +38,12 @@ export interface RemoteRecordingOptions {
   sampleRate?: number;
   /** Extra CSS selector for parts of the page never recorded. `[data-ut-no-track]` and `.recap-private` always are. */
   blockSelector?: string;
+  /**
+   * Text to replace with `*` in recordings, keeping the layout: `true` for all text on the page, or
+   * a CSS selector for the parts to mask (and everything inside them). Text inside `.ut-mask` is
+   * always masked. Form fields are always masked, whatever this says. Default: only `.ut-mask`.
+   */
+  maskText?: boolean | string;
 }
 
 export interface RemoteConfig {
@@ -221,6 +234,25 @@ export class RemoteSink {
     this.stopFns.forEach((f) => f());
     this.stopFns = [];
     void this.flush();
+  }
+
+  /**
+   * The visitor opted out: stop at once and delete everything not yet sent (events and
+   * recording). The browser's random id is forgotten too, so a later opt-in can't be linked to
+   * earlier visits.
+   */
+  discard(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    this.stopFns.forEach((f) => f());
+    this.stopFns = [];
+    this.endRecording('opted out: recording stopped');
+    this.queue = [];
+    try {
+      localStorage.removeItem(KEY_ANON);
+    } catch {
+      // storage blocked: nothing was kept
+    }
   }
 
   getSessionId(): string {
@@ -439,6 +471,8 @@ export class RemoteSink {
       emit: (e: RrwebEvent) => this.pushDom(e),
       maskAllInputs: true,
       blockSelector: block,
+      // Text is replaced with * (same length, so the layout stays): .ut-mask always, plus maskText.
+      maskTextSelector: maskTextSelectorFor(o.maskText),
       inlineStylesheet: true,
       recordCanvas: false,
       collectFonts: false,

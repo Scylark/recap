@@ -2,7 +2,14 @@
 
 import type { ClickEvent, PageRegion, Viewport } from '../types.js';
 import { getSessionId, getTimestamp } from './session.js';
-import { sanitizeUrl, isExcluded, extractLabel, nearestHeading } from '../privacy/sanitize.js';
+import {
+  pageName,
+  isExcluded,
+  extractLabel,
+  nearestHeading,
+  interactiveTarget,
+  getLabelMode,
+} from '../privacy/sanitize.js';
 
 // --- CSS selector generation ---
 
@@ -161,11 +168,15 @@ export function resumeClickCapture(): void { _paused = false; }
 
 function onDocumentClick(e: MouseEvent): void {
   try {
-    const target = e.target as Element | null;
-    if (!target || !_handler || _paused) return;
+    const hit = e.target as Element | null;
+    if (!hit || !_handler || _paused || typeof hit.closest !== 'function') return;
 
-    // Privacy: skip excluded elements
-    if (isExcluded(target)) return;
+    // Privacy: skip anything inside data-ut-no-track, ut-block or recap-private
+    if (isExcluded(hit)) return;
+
+    // A tap on an icon or span inside a button is a tap on the button: label, selector and
+    // position come from the closest interactive element.
+    const target = interactiveTarget(hit);
 
     // Privacy: never capture form inputs values
     const tag = target.tagName.toUpperCase();
@@ -181,7 +192,8 @@ function onDocumentClick(e: MouseEvent): void {
 
     const selector = generateSelector(target);
     const label = extractLabel(target);
-    const heading = nearestHeading(target);
+    // The nearest heading is on-screen text too: only in 'text' label mode.
+    const heading = getLabelMode() === 'text' ? nearestHeading(target) : null;
     const region = getPageRegion(e.clientX, e.clientY, viewport);
 
     const dataAttributes = extractDataAttributes(target);
@@ -189,7 +201,7 @@ function onDocumentClick(e: MouseEvent): void {
       sessionId: getSessionId(),
       timestamp: getTimestamp(),
       type: 'click',
-      url: sanitizeUrl(location.href, _stripQuery),
+      url: pageName(location.href, _stripQuery),
       viewport,
       pageX: e.pageX,
       pageY: e.pageY,

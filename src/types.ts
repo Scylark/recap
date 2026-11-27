@@ -98,8 +98,35 @@ export interface RecapConfig {
   recordings?: boolean | RemoteRecordingOptions;
   /** Log what's sent to the dashboard in the console. */
   debug?: boolean;
-  shortcut?: string; // override keyboard shortcut
+  /**
+   * The researcher panel and the shortcut and touch-hold that open it. `false` turns all three off
+   * (use it on live sites, so visitors never see it). Default true. Script tag: data-panel="false".
+   */
+  panel?: boolean;
+  /** Keyboard shortcut for the panel, e.g. "ctrl+shift+y", or false for none. Default "alt+shift+y". */
+  shortcut?: string | false;
   stripQueryParams?: boolean; // default true
+  /**
+   * Where tap labels come from. `'text'`: also the tapped element's visible text. `'attributes'`:
+   * only aria-label, aria-labelledby, title, alt and placeholder. `'none'`: only your own
+   * data-ut-label. data-ut-label is always used, and inside `.ut-mask` it is the only source.
+   * Default: `'text'` while data stays in the browser, `'attributes'` once sessions go to a
+   * dashboard (`supabase`, `remote` or `connect()`). Script tag: data-labels.
+   */
+  labels?: 'none' | 'attributes' | 'text';
+  /**
+   * Name screens your way: gets each page's path (e.g. "/app/dashboard.html") and returns the name
+   * to count it under (e.g. "/app/dashboard"). Return the path, or nothing, to keep it as it is.
+   * Used for page views, taps, scrolls and the dashboard's screen names. Set it in the first
+   * init() call (with the script tag, use data-auto-init="false" and call init() yourself).
+   */
+  screenName?: (path: string) => string | null | undefined;
+  /**
+   * Record and send nothing until Recap.optIn() is called. The choice is remembered in this
+   * browser. Recap.optOut() works with or without this. Default false. Script tag:
+   * data-require-consent="true".
+   */
+  requireConsent?: boolean;
 
   /** Enable the touch-hold gesture that opens/closes the panel on touch devices. Default: true. */
   touchTrigger?: boolean;

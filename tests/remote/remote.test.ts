@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { RemoteSink, type RrwebEvent } from '../../src/remote/remote';
+import { RemoteSink, maskTextSelectorFor, type RrwebEvent } from '../../src/remote/remote';
 import type { AnyEvent } from '../../src/types';
 
 type Call = { url: string; body: { payload: Record<string, unknown> }; keepalive: boolean };
@@ -346,5 +346,64 @@ describe('RemoteSink recording limits', () => {
     const dom = calls.find((c) => c.url.endsWith('recap_dom'))!.body.payload as { events: { type: number }[] };
     expect(dom.events.map((e) => e.type)).toEqual([4, 2]);
     sink.stop();
+  });
+});
+
+describe('RemoteSink recordings text masking', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  function optionsFor(maskText?: boolean | string): Record<string, unknown> {
+    const record = vi.fn(() => () => undefined);
+    const recordings = maskText === undefined ? { record } : { record, maskText };
+    const sink = new RemoteSink({ ...config, recordings }, fakeFetch().fn);
+    sink.start();
+    sink.stop();
+    sessionStorage.clear();
+    return (record.mock.calls[0] as unknown as [Record<string, unknown>])[0];
+  }
+
+  it('masks .ut-mask text by default, all text with maskText: true, or a selector', () => {
+    expect(optionsFor()).toMatchObject({ maskAllInputs: true, maskTextSelector: '.ut-mask' });
+    expect(optionsFor(true)).toMatchObject({ maskAllInputs: true, maskTextSelector: '*' });
+    expect(optionsFor('.ride-name, [data-private-text]')).toMatchObject({
+      maskAllInputs: true,
+      maskTextSelector: '.ut-mask, .ride-name, [data-private-text]',
+    });
+    expect(maskTextSelectorFor(false)).toBe('.ut-mask');
+    expect(maskTextSelectorFor('  ')).toBe('.ut-mask');
+  });
+
+  it('keeps blocking private parts as well as masking text', () => {
+    expect(String(optionsFor(true)['blockSelector'])).toContain('.recap-private');
+  });
+});
+
+describe('RemoteSink.discard', () => {
+  it('drops everything not yet sent, stops recording and forgets the browser id', async () => {
+    sessionStorage.clear();
+    const { fn, calls } = fakeFetch();
+    const stop = vi.fn();
+    let emit: ((e: RrwebEvent) => void) | null = null;
+    const record = (opts: { emit: (e: RrwebEvent) => void }) => {
+      emit = opts.emit;
+      return stop;
+    };
+    const sink = new RemoteSink({ ...config, recordings: { record } }, fn);
+    sink.start();
+    sink.handle(nav('/'));
+    await sink.flush();
+    expect(localStorage.getItem('recap-remote-anon')).not.toBeNull();
+    const before = calls.length;
+    sink.track('waiting');
+    emit!({ type: 3, timestamp: Date.now() });
+    sink.discard();
+    await sink.flush();
+    expect(calls.length).toBe(before);
+    expect(sink.pending()).toHaveLength(0);
+    expect(stop).toHaveBeenCalled();
+    expect(localStorage.getItem('recap-remote-anon')).toBeNull();
   });
 });

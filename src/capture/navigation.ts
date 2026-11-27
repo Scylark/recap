@@ -2,7 +2,7 @@
 
 import type { NavigationEvent } from '../types.js';
 import { getSessionId, getTimestamp } from './session.js';
-import { sanitizeUrl } from '../privacy/sanitize.js';
+import { pageName as sanitizeUrl } from '../privacy/sanitize.js';
 
 type NavHandler = (event: NavigationEvent) => void;
 
@@ -78,6 +78,16 @@ function onHashChange(): void {
   } catch (err) {
     console.error('[Recap] hashchange handler error:', err);
   }
+}
+
+/**
+ * Report the page the visitor is on now as a page load, e.g. once they opt in, so the session
+ * starts with the screen they were on.
+ */
+export function emitCurrentPage(): void {
+  if (!_handler) return;
+  _currentUrl = location.href;
+  emit('', sanitizeUrl(location.href, _stripQuery), 'pageload');
 }
 
 export function initNavigationCapture(handler: NavHandler, stripQuery = true): () => void {
