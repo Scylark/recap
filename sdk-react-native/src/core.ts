@@ -27,6 +27,8 @@ const KEY_SHOTS = 'recap:shots';
 /** A label arriving this close to a tap (either side) is attached to that tap. */
 const LABEL_WINDOW_MS = 600;
 const SCROLL_MILESTONES = [25, 50, 75, 100];
+/** Recording keeps following a scroll until it has been still for this long. */
+const SCROLL_SETTLE_MS = 400;
 
 type ConsentState = 'granted' | 'denied' | 'unknown';
 
@@ -98,6 +100,8 @@ export class RecapCore {
   private recBusy = false;
   private recLast: string | null | undefined = undefined;
   private recNudgedAt = -Infinity;
+  private recScrollAt = -Infinity;
+  private recFollowing = false;
   private recBuffer: { sessionId: string; t: number; image: string | null }[] = [];
   private recSending = false;
   private privacyHolds = 0;
@@ -302,8 +306,9 @@ export class RecapCore {
   }
 
   /**
-   * Something is moving on screen (a tap, a scroll, a new screen), so take a couple of quick extra
-   * frames. Without these a scroll or a tap's result can fall between the once-a-second pictures.
+   * Something changed on screen (a tap or a new screen), so take a couple of quick extra frames.
+   * Without these a tap's result can fall between the once-a-second pictures. Scrolls use
+   * followScroll instead.
    */
   private nudgeRecording(): void {
     if (!this.recOptions || !this.recSampled) return;
@@ -311,6 +316,29 @@ export class RecapCore {
     if (now - this.recNudgedAt < 300) return;
     this.recNudgedAt = now;
     for (const ms of [120, 450]) this.setTimeoutFn(() => void this.recordFrame(), ms);
+  }
+
+  /**
+   * The person is scrolling. Keep taking frames every `scrollIntervalMs` until the scrolling has
+   * stopped for a moment, so the replay shows the page moving instead of jumping to where it ended.
+   */
+  private followScroll(): void {
+    const opt = this.recOptions;
+    if (!opt || !this.recSampled) return;
+    this.recScrollAt = this.now();
+    if (this.recFollowing) return;
+    this.recFollowing = true;
+    const every = Math.max(80, opt.scrollIntervalMs ?? 150);
+    const step = () => {
+      void this.recordFrame().finally(() => {
+        if (this.now() - this.recScrollAt < SCROLL_SETTLE_MS) {
+          this.setTimeoutFn(step, every);
+        } else {
+          this.recFollowing = false;
+        }
+      });
+    };
+    this.setTimeoutFn(step, 0);
   }
 
   /** Takes one frame. Runs on a timer; exposed for tests. */
@@ -454,7 +482,7 @@ export class RecapCore {
 
   /** Report scroll depth (0 to 100) for the current screen. Only milestones and new maximums are kept. */
   scroll(depth: number, screen: string | null = this.currentScreen): void {
-    this.nudgeRecording();
+    this.followScroll();
     const key = screen ?? '';
     const d = Math.max(0, Math.min(100, Math.round(depth)));
     const prev = this.scrollMax.get(key) ?? 0;

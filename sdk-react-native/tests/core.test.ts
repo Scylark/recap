@@ -340,7 +340,7 @@ describe('RecapCore', () => {
     expect(transport.batches[0]!.session.id).toBe(frames[0]!.sessionId);
   });
 
-  it('takes quick extra frames after taps and scrolls, but not too often', async () => {
+  it('takes quick extra frames after taps, but not too often', async () => {
     const timers: { fn: () => void; ms: number }[] = [];
     const d = { ...deps, setTimeout: (fn: () => void, ms: number) => void timers.push({ fn, ms }) };
     const transport = { ...fakeTransport(), sendFrames: async () => undefined };
@@ -352,10 +352,11 @@ describe('RecapCore', () => {
     const before = timers.length;
     r.tap({ x: 10, y: 10 });
     expect(timers.slice(before).map((x) => x.ms)).toEqual([120, 450]);
-    r.scroll(10); // within 300ms of the tap: no second burst
+    clock += 100;
+    r.tap({ x: 12, y: 12 }); // within 300ms of the last tap: no second burst
     expect(timers.length).toBe(before + 2);
     clock += 400;
-    r.scroll(20);
+    r.tap({ x: 14, y: 14 });
     expect(timers.length).toBe(before + 4);
 
     const plain = new RecapCore(d);
@@ -366,6 +367,50 @@ describe('RecapCore', () => {
     expect(timers.length).toBe(n); // recordings off: no extra frames
     await r.shutdown();
     await plain.shutdown();
+  });
+
+  it('keeps taking frames while the person scrolls, then stops once the page settles', async () => {
+    const timers: { fn: () => void; ms: number }[] = [];
+    const d = { ...deps, setTimeout: (fn: () => void, ms: number) => void timers.push({ fn, ms }) };
+    const sent: { t: number }[] = [];
+    const transport = {
+      ...fakeTransport(),
+      sendFrames: async (f: { frames: { t: number }[] }) => void sent.push(...f.frames),
+    };
+    const r = new RecapCore(d);
+    await r.init({ appId: 'test', transport, recordings: true }, device);
+    r.screen('Home');
+    let n = 0;
+    r.setScreenCapture(async () => `P${n++}`); // every picture differs, like a moving page
+    timers.length = 0;
+    // Run queued timers one at a time, letting each frame finish first.
+    const runNext = async () => {
+      const next = timers.shift()!;
+      clock += next.ms;
+      next.fn();
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    };
+
+    r.scroll(10);
+    r.scroll(12); // already following: no second loop
+    expect(timers.map((x) => x.ms)).toEqual([0]);
+    for (let i = 0; i < 3; i++) {
+      await runNext();
+      r.scroll(20 + i); // still scrolling
+    }
+    // Scrolling stops; the loop runs on for about 400 ms and then ends.
+    while (timers.length) await runNext();
+    expect(n).toBeGreaterThanOrEqual(5);
+    const before = n;
+    r.scroll(60); // a new scroll starts a new loop
+    expect(timers.map((x) => x.ms)).toEqual([0]);
+    while (timers.length) await runNext();
+    expect(n).toBeGreaterThan(before);
+    await r.shutdown();
+    const ts = sent.map((f) => f.t);
+    expect(ts).toEqual([...ts].sort((a, b) => a - b));
+    // Frames during the scroll are about 150 ms apart, not one a second.
+    expect(ts[2]! - ts[1]!).toBeLessThanOrEqual(150);
   });
 
   it('records no frames unless switched on, and respects maxFrames', async () => {

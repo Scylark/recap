@@ -129,13 +129,14 @@ function ShoeImage({ colour, tall }) {
 // ---------- Screens ----------
 
 function Home({ navigation }) {
+  const onScroll = useRecapScroll();
   const [category, setCategory] = useState('All');
   const [sort, setSort] = useState('popular');
   const shown = PRODUCTS.filter(
     (p) => category === 'All' || (category === 'Trail' && p.id.startsWith('TRAIL')) || (category === 'Road' && p.id.startsWith('ROAD')) || (category === 'Hiking' && p.id.startsWith('HIKE')),
   ).sort((a, b) => (sort === 'low' ? a.price - b.price : sort === 'high' ? b.price - a.price : 0));
   return (
-    <ScrollView contentContainerStyle={s.screen}>
+    <ScrollView onScroll={onScroll} scrollEventThrottle={50} contentContainerStyle={s.screen}>
       <View style={s.hero}>
         <Text style={s.heroTitle}>Winter sale</Text>
         <Text style={s.heroText}>Up to 30% off trail shoes this week</Text>
@@ -250,13 +251,14 @@ function Product({ navigation, route }) {
 }
 
 function Basket({ navigation }) {
+  const onScroll = useRecapScroll();
   const basket = useBasket();
   const [promo, setPromo] = useState('');
   const [promoMsg, setPromoMsg] = useState(null);
   const subtotal = basket.items.reduce((n, i) => n + i.price * i.qty, 0);
 
   return (
-    <ScrollView contentContainerStyle={s.screen}>
+    <ScrollView onScroll={onScroll} scrollEventThrottle={50} contentContainerStyle={s.screen}>
       <Text style={s.h1}>Basket</Text>
       {basket.items.length === 0 && <Text style={s.p}>Your basket is empty.</Text>}
       {basket.items.map((item, idx) => (
@@ -301,6 +303,7 @@ function Basket({ navigation }) {
 }
 
 function Checkout({ navigation }) {
+  const onScroll = useRecapScroll();
   const basket = useBasket();
   const [form, setForm] = useState({ name: '', email: '', postcode: '' });
   const [delivery, setDelivery] = useState(null);
@@ -330,7 +333,7 @@ function Checkout({ navigation }) {
   }
 
   return (
-    <ScrollView contentContainerStyle={s.screen} keyboardShouldPersistTaps="handled">
+    <ScrollView onScroll={onScroll} scrollEventThrottle={50} contentContainerStyle={s.screen} keyboardShouldPersistTaps="handled">
       <Text style={s.h1}>Checkout</Text>
       {/* Recordings pause while this is on screen, so names and addresses are never captured. */}
       <RecapPrivate>

@@ -70,6 +70,8 @@ export interface FramesPayload {
 export interface RecordingOptions {
   /** Time between frames. Default 1000 ms. Frames that look the same as the last one are skipped. */
   intervalMs?: number;
+  /** Time between frames while the person is scrolling. Default 150 ms, minimum 80. */
+  scrollIntervalMs?: number;
   /** Share of sessions to record, 0 to 1, on top of `sampleRate`. Default 1. */
   sampleRate?: number;
   /** Stop recording a session after this many frames. Default 600 (ten minutes at one a second). */

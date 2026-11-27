@@ -130,11 +130,18 @@ export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.1
     setPlaying((p) => !p);
   };
 
-  // Keep the active row in the event list in view while playing.
+  // Keep the active row in the event list in view while playing. Only the list scrolls:
+  // scrollIntoView would also move the whole page, making the view jump at every tap.
   const listRef = useRef<HTMLOListElement>(null);
   useEffect(() => {
     if (!playing) return;
-    listRef.current?.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
+    const list = listRef.current;
+    const row = list?.querySelector<HTMLElement>('.active');
+    if (!list || !row) return;
+    const top = row.offsetTop - list.offsetTop;
+    const bottom = top + row.offsetHeight;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight;
   }, [current?.id, playing]);
 
   return (
