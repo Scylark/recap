@@ -255,7 +255,9 @@ export class RecapCore {
     const from = this.currentScreen;
     this.currentScreen = name;
     this.record('screen', { from, ...props });
-    this.settleAfterScreenChange();
+    // The first screen appears without sliding in, so record it straight away.
+    if (from) this.settleAfterScreenChange();
+    else this.nudgeRecording();
     this.maybeScreenshot(name);
   }
 
@@ -330,6 +332,8 @@ export class RecapCore {
     const opt = this.recOptions;
     if (!opt || !this.recSampled) return;
     this.recScrollAt = this.now();
+    // Someone scrolling the new screen means it has finished sliding in.
+    this.recSettleUntil = -Infinity;
     if (this.recFollowing) return;
     this.recFollowing = true;
     const every = Math.max(80, opt.scrollIntervalMs ?? 150);

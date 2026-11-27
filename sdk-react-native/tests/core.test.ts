@@ -347,7 +347,7 @@ describe('RecapCore', () => {
     const r = new RecapCore(d);
     await r.init({ appId: 'test', transport, recordings: true }, device);
     r.screen('Home');
-    expect(timers.map((x) => x.ms)).toEqual([470, 800]); // a new screen: two frames once it has slid in
+    expect(timers.map((x) => x.ms)).toEqual([120, 450]); // the first screen gets a quick burst
     clock += 1000;
     const before = timers.length;
     r.tap({ x: 10, y: 10 });
@@ -426,7 +426,13 @@ describe('RecapCore', () => {
     await r.init({ appId: 'test', transport, recordings: true }, device);
     let n = 0;
     r.setScreenCapture(async () => `P${n++}`);
-    r.screen('Home');
+    r.screen('Home'); // first screen: no slide, recorded straight away
+    clock += 120;
+    await r.recordFrame();
+    expect(n).toBe(1);
+    n = 0;
+    clock += 1000;
+    r.screen('Product');
     const start = clock;
     clock = start + 200;
     await r.recordFrame(); // the once-a-second timer fires mid-slide: skipped
@@ -434,8 +440,13 @@ describe('RecapCore', () => {
     clock = start + 470;
     await r.recordFrame(); // landed
     expect(n).toBe(1);
+    clock = start + 1500;
+    r.screen('Basket');
+    clock = start + 1600;
+    r.scroll(30); // scrolling straight away: the screen has landed, so record now
+    await r.recordFrame();
+    expect(n).toBe(2);
     await r.shutdown();
-    expect(sent.map((f) => f.t)).toEqual([470]);
   });
 
   it('records no frames unless switched on, and respects maxFrames', async () => {
