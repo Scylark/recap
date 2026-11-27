@@ -67,8 +67,10 @@ The anon key is designed to be public and is safe to ship in the app: with Recap
 the `recap_ingest` function and cannot read any data. **Never** put the `service_role` key in the app or
 the dashboard.
 
-Optional, recommended: automatic deletion after 90 days. In the SQL editor, enable the `pg_cron`
-extension and run `select cron.schedule('recap-retention', '0 3 * * *', $$select public.recap_purge(90)$$);`
+Storage limits come with the migrations: data older than 90 days is deleted automatically, and new
+sessions pause if Recap's data reaches 400 MB (Supabase's free plan allows 500 MB). An admin can change
+both, and the share of sessions and replays kept, on the dashboard's **Storage** page. These limits are
+enforced in the database, so they apply to every app without an app update.
 
 ## Step 2. Install the SDK
 
@@ -187,7 +189,8 @@ privacy" in the replay. Before turning it on in production:
 - **Ask** the owner, and find every screen that shows names, addresses, payment details, messages or
   health data. Wrap those in `<RecapPrivate>` or list them in `exclude`.
 - Use `sampleRate` (e.g. `0.1`) on busy apps: Supabase's free database is 500 MB, and a ten-minute
-  recording is a few MB. Also set up `recap_purge` retention (below).
+  recording is a few MB. The dashboard's Storage page can also keep replays for only a share of
+  sessions, and deletes old data automatically.
 - Update the privacy policy and store disclosures (see docs/mobile-privacy.md).
 - Check how the app shows menus, pickers and bottom sheets. A React Native `<Modal>` (and libraries
   built on it) opens a separate native window that recordings can't see, so the replay shows the page

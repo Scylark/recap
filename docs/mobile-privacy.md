@@ -101,7 +101,7 @@ other companies' data, or share data with data brokers.
    `recap.optIn()` from the existing consent flow.
 2. Offer an opt-out (`recap.optOut()`) in settings.
 3. Choose a Supabase region near your users (an EU region for EU users) when creating the project.
-4. Set retention, e.g. 90 days with `recap_purge(90)` on a schedule.
+4. Set retention on the dashboard's Storage page (90 days by default; old sessions are deleted automatically).
 5. Handle deletion requests from the dashboard's Team page, or with `select recap_forget_user('<id>')`.
 6. Mention in-app analytics, storage location and retention in the privacy policy. Supabase acts as the
    owner's processor under its own DPA.

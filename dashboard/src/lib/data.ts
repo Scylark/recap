@@ -273,3 +273,58 @@ export async function deleteSession(id: string): Promise<void> {
 export async function forgetUser(userId: string): Promise<number> {
   return check(await db().rpc('recap_forget_user', { p_user_id: userId })) as number;
 }
+
+// ------------------------------------------------------------------ storage limits
+
+export interface StorageSettings {
+  id?: number;
+  keep_days: number | null;
+  session_sample: number;
+  replay_sample: number;
+  max_frames: number;
+  daily_sessions: number | null;
+  max_db_mb: number | null;
+  last_purge_at: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export interface StorageUsage {
+  databaseBytes: number;
+  recapBytes: number;
+  sessionsBytes: number;
+  eventsBytes: number;
+  framesBytes: number;
+  screenshotsBytes: number;
+  sessions: number;
+  sessionsToday: number;
+  sessionsWithReplay: number;
+  oldestSession: string | null;
+}
+
+/** Null when the storage limits migration hasn't been run on this database yet. */
+export async function getStorageSettings(): Promise<StorageSettings | null> {
+  const res = await db().from('recap_settings').select('*').eq('id', 1).limit(1);
+  if (res.error) {
+    if (/recap_settings|PGRST205|42P01|not found/i.test(`${res.error.message} ${(res.error as { code?: string }).code ?? ''}`)) return null;
+    throw new Error(res.error.message);
+  }
+  return ((res.data as StorageSettings[] | null) ?? [])[0] ?? null;
+}
+
+export type StorageSettingsInput = Pick<
+  StorageSettings,
+  'keep_days' | 'session_sample' | 'replay_sample' | 'max_frames' | 'daily_sessions' | 'max_db_mb'
+>;
+
+export async function saveStorageSettings(s: StorageSettingsInput, by: string): Promise<void> {
+  check(await db().from('recap_settings').update({ ...s, updated_by: by, updated_at: new Date().toISOString() }).eq('id', 1));
+}
+
+export async function storageUsage(): Promise<StorageUsage> {
+  return check(await db().rpc('recap_storage_usage')) as StorageUsage;
+}
+
+export async function purgeNow(): Promise<number> {
+  return check(await db().rpc('recap_purge_now')) as number;
+}

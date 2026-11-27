@@ -288,3 +288,15 @@ tr.selected td { background: var(--accent-soft); }
 .web-replay-page .replayer-wrapper { position: relative; }
 .web-replay-page iframe { border: 0; background: #fff; }
 .web-replay-stage .replay-mode { z-index: 2; left: auto; right: 10px; top: auto; bottom: 8px; }
+/* Storage page */
+.storage-meter { margin-bottom: 16px; }
+.meter { height: 10px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; margin: 14px 0 8px; }
+.meter > span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.meter.high > span { background: var(--warn); }
+.meter.full > span { background: var(--error); }
+.storage-form fieldset { border: none; padding: 0; margin: 0 0 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px 24px; }
+.storage-form label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; font-size: 14px; }
+.storage-form label small { color: var(--muted); font-weight: normal; font-size: 12px; }
+.storage-form .unit { display: flex; align-items: center; gap: 6px; font-weight: normal; }
+.storage-form .unit input { width: 90px; }
+.storage-form label > input { max-width: 160px; }

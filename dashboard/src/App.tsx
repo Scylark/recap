@@ -10,6 +10,7 @@ import { Members } from './pages/Members';
 import { Overview } from './pages/Overview';
 import { SessionDetail } from './pages/SessionDetail';
 import { Sessions } from './pages/Sessions';
+import { Storage } from './pages/Storage';
 
 const RANGES: { days: number; label: string }[] = [
   { days: 1, label: 'Last 24 hours' },
@@ -65,6 +66,7 @@ function SignedIn({ email }: { email: string }) {
 
   let body: ReactElement;
   if (page === 'members') body = <Members isAdmin={isAdmin} me={email} />;
+  else if (page === 'storage') body = <Storage isAdmin={isAdmin} me={email} />;
   else if (!appId) {
     body = apps.loading ? (
       <p className="muted">Loading…</p>
@@ -103,6 +105,7 @@ function SignedIn({ email }: { email: string }) {
           {nav('analytics', 'Analytics')}
           {nav('heatmaps', 'Heatmaps')}
           {nav('members', 'Team')}
+          {nav('storage', 'Storage')}
         </nav>
         <div className="controls">
           {(apps.data?.length ?? 0) > 1 && (
