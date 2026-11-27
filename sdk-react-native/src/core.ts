@@ -356,7 +356,7 @@ export class RecapCore {
     }
     this.recBusy = true;
     try {
-      const raw = await this.capture({ width: opt.width ?? 280, quality: opt.quality ?? 0.4 });
+      const raw = await this.capture({ width: opt.width ?? 280, quality: opt.quality ?? 0.4, recording: true });
       // Something private may have appeared while the picture was being taken.
       if (!raw || this.recordingPausedFor() || this.session?.id !== sessionId) return;
       const image = raw.startsWith('data:') ? raw : `data:image/jpeg;base64,${raw}`;

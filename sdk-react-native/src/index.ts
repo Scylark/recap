@@ -6,6 +6,7 @@ export {
   useRecapScroll,
   recapPress,
   RecapPrivate,
+  RecapModal,
   useRecapPrivate,
   type RecapProviderProps,
   type NavigationRefLike,

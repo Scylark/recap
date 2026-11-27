@@ -190,10 +190,10 @@ privacy" in the replay. Before turning it on in production:
   recording is a few MB. Also set up `recap_purge` retention (below).
 - Update the privacy policy and store disclosures (see docs/mobile-privacy.md).
 - Check how the app shows menus, pickers and bottom sheets. A React Native `<Modal>` (and libraries
-  built on it) opens a separate native window that recordings and screen pictures can't see, so the
-  replay shows the page underneath with the taps but not the open menu. Where it matters, draw the
-  sheet inside the app's own view instead (an absolutely positioned overlay near the root, as the
-  test shop's `SheetHost` does).
+  built on it) opens a separate native window that recordings can't see, so the replay shows the page
+  underneath and taps inside it aren't counted. The quickest fix is a one-line import swap:
+  `import { RecapModal as Modal } from '@recap-ux/react-native'` (same props; while open, replay frames
+  capture the modal itself). Or draw the sheet inside the app's own view, as the test shop's `SheetHost` does.
 
 ## Step 4. Make the data readable
 
@@ -295,7 +295,7 @@ network access. Upload errors are logged when `debug` is on.
 Props on `RecapProvider`: `config`, `navigationRef?`, `device?`, `captureRef?` (from react-native-view-shot).
 
 API: `recap.screen(name)`, `recap.track(name, props)`, `recap.setUserId(id | null)`, `recap.optIn()`,
-`recap.optOut()`, `recap.flush()`, `recap.getAnonymousId()`, `<RecapPrivate>`, `useRecapPrivate()`, `recapPress(label, handler)`, `useRecapScreen(name)`, `useRecapScroll()`.
+`recap.optOut()`, `recap.flush()`, `recap.getAnonymousId()`, `<RecapPrivate>`, `useRecapPrivate()`, `<RecapModal>`, `recapPress(label, handler)`, `useRecapScreen(name)`, `useRecapScroll()`.
 
 ### Using your own backend instead of Supabase
 

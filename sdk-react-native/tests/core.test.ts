@@ -300,7 +300,7 @@ describe('RecapCore', () => {
     let n = 0;
     const pictures = ['A', 'A', 'B'];
     r.setScreenCapture(async (opts) => {
-      expect(opts).toEqual({ width: 280, quality: 0.4 });
+      expect(opts).toEqual({ width: 280, quality: 0.4, recording: true });
       return pictures[n++] ?? 'C';
     });
     r.screen('Home');

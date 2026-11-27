@@ -58,7 +58,8 @@ export interface ScreenshotPayload {
  * Takes a picture of the app's root view. RecapProvider builds one from react-native-view-shot's
  * captureRef when you pass it. Returns base64 JPEG data (no data: prefix).
  */
-export type ScreenCapture = (opts?: { width?: number; quality?: number }) => Promise<string | null>;
+/** `recording` is set for replay frames, which also show an open <RecapModal>; screen pictures never do. */
+export type ScreenCapture = (opts?: { width?: number; quality?: number; recording?: boolean }) => Promise<string | null>;
 
 /** A run of recording frames for one session. `image` is null while recording was paused for privacy. */
 export interface FramesPayload {

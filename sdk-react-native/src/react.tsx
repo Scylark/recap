@@ -1,14 +1,16 @@
 // React Native bindings: <RecapProvider>, screen tracking hooks, scroll helper and press labels.
 
-import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import {
   AppState,
   Dimensions,
   Keyboard,
+  Modal,
   PixelRatio,
   Platform,
   View,
   type GestureResponderEvent,
+  type ModalProps,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
@@ -89,14 +91,79 @@ function detectDevice(extra: Partial<DeviceInfo>): Partial<DeviceInfo> {
  * Wrap your app once, near the root. Records taps anywhere in the app, app foreground and
  * background, and screens if you pass a navigationRef.
  */
-export function RecapProvider({ config, children, navigationRef, device, captureRef }: RecapProviderProps) {
+/**
+ * Touch handlers that record taps. Touch events bubble to the View that has them without it taking the
+ * responder, so app gestures are untouched.
+ */
+function useTapRecorder() {
   const touch = useRef<{ x: number; y: number; at: number } | null>(null);
+  const onTouchStart = useCallback((e: GestureResponderEvent) => {
+    const ne = e.nativeEvent;
+    if ((ne.touches?.length ?? 1) > 1) {
+      touch.current = null;
+      return;
+    }
+    const p = point(ne);
+    touch.current = p ? { ...p, at: Date.now() } : null;
+  }, []);
+
+  const onTouchEnd = useCallback((e: GestureResponderEvent) => {
+    const start = touch.current;
+    touch.current = null;
+    const end = point(e.nativeEvent);
+    if (!start || !end) return;
+    const moved = Math.hypot(end.x - start.x, end.y - start.y);
+    if (moved <= TAP_MAX_MOVE && Date.now() - start.at <= TAP_MAX_MS) {
+      recap.tap(end);
+    }
+  }, []);
+
+  const onTouchCancel = useCallback(() => {
+    touch.current = null;
+  }, []);
+
+  return { onTouchStart, onTouchEnd, onTouchCancel };
+}
+
+const openModals: RefObject<View | null>[] = [];
+
+/**
+ * A drop-in replacement for React Native's <Modal> that shows up in session replays. A plain <Modal>
+ * (dropdowns, bottom sheets, dialogs) draws in its own window, which the recorder can't see.
+ * `import { RecapModal as Modal } from '@recap-ux/react-native'` is usually all it takes.
+ */
+export function RecapModal({ children, visible = true, ...props }: ModalProps) {
+  const ref = useRef<View>(null);
+  // Touches inside a modal never reach the provider's root view, so record them here.
+  const taps = useTapRecorder();
+  useEffect(() => {
+    if (!visible) return;
+    openModals.push(ref);
+    return () => {
+      const i = openModals.indexOf(ref);
+      if (i >= 0) openModals.splice(i, 1);
+    };
+  }, [visible]);
+  return (
+    <Modal visible={visible} {...props}>
+      <View ref={ref} collapsable={false} style={{ flex: 1 }} {...taps}>
+        {children}
+      </View>
+    </Modal>
+  );
+}
+
+export function RecapProvider({ config, children, navigationRef, device, captureRef }: RecapProviderProps) {
   const root = useRef<View>(null);
 
   useEffect(() => {
     if (!captureRef || (!config.screenshots && !config.recordings)) return;
     recap.setScreenCapture(async (opts) => {
-      if (!root.current) return null;
+      // A React Native <Modal> draws in its own window, outside the app's root view, so replay frames
+      // capture the newest open <RecapModal> instead. Heatmap screen pictures always use the screen.
+      const modal = opts?.recording ? [...openModals].reverse().find((m) => m.current)?.current : null;
+      const target = modal ?? root.current;
+      if (!target) return null;
       // view-shot only shrinks the picture when it gets both a width and a height; with a width alone
       // it captures at full phone resolution, which is several times bigger and slower to take.
       // On iOS view-shot treats the size as points and renders at the screen's scale (3x on most
@@ -105,7 +172,7 @@ export function RecapProvider({ config, children, navigationRef, device, capture
       const win = Dimensions.get('window');
       const height = Math.round(width * (win.width > 0 ? win.height / win.width : 2.16));
       const scale = Platform.OS === 'ios' ? Math.max(1, PixelRatio.get()) : 1;
-      return captureRef(root.current, {
+      return captureRef(target, {
         format: 'jpg',
         quality: opts?.quality ?? 0.6,
         width: width / scale,
@@ -161,40 +228,14 @@ export function RecapProvider({ config, children, navigationRef, device, capture
     };
   }, [navigationRef]);
 
-  // Touch events bubble to this root View without taking the responder, so app gestures are untouched.
-  const onTouchStart = useCallback((e: GestureResponderEvent) => {
-    const ne = e.nativeEvent;
-    if ((ne.touches?.length ?? 1) > 1) {
-      touch.current = null;
-      return;
-    }
-    const p = point(ne);
-    touch.current = p ? { ...p, at: Date.now() } : null;
-  }, []);
-
-  const onTouchEnd = useCallback((e: GestureResponderEvent) => {
-    const start = touch.current;
-    touch.current = null;
-    const end = point(e.nativeEvent);
-    if (!start || !end) return;
-    const moved = Math.hypot(end.x - start.x, end.y - start.y);
-    if (moved <= TAP_MAX_MOVE && Date.now() - start.at <= TAP_MAX_MS) {
-      recap.tap(end);
-    }
-  }, []);
-
-  const onTouchCancel = useCallback(() => {
-    touch.current = null;
-  }, []);
+  const taps = useTapRecorder();
 
   return (
     <RecapContext.Provider value={recap}>
       <View
         ref={root}
         style={{ flex: 1 }}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
-        onTouchCancel={onTouchCancel}
+        {...taps}
         collapsable={false}
       >
         {children}
