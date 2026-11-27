@@ -61,7 +61,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build && vite build --mode script-tag && vite build --config vite.react.config.ts && tsc --emitDeclarationOnly",
+    "build": "vite build && vite build --mode script-tag && vite build --mode rrweb && vite build --config vite.react.config.ts && tsc --emitDeclarationOnly",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -103,5 +103,8 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "rrweb": "2.2.2"
   }
 }

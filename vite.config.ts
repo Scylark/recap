@@ -23,10 +23,52 @@ export default defineConfig(({ command, mode }) => {
     };
   }
 
-  // Production library build, in two passes:
+  // Production library build, in three passes:
   // - `vite build`: the ES and CommonJS modules from src/index.ts. Importing them starts nothing.
   // - `vite build --mode script-tag`: dist/recap.min.js from src/browser.ts, which starts itself
   //   from its <script> tag's data-* attributes.
+  // - `vite build --mode rrweb`: dist/recap-rrweb.min.js, rrweb's `record` only, as a plain browser
+  //   script that sets window.rrweb. Recap loads it on its own when a tab is sampled in for page
+  //   recordings. It is a .js file because jsDelivr serves rrweb's own .umd.min.cjs as
+  //   application/node with nosniff, which browsers refuse to run.
+  if (mode === 'rrweb') {
+    return {
+      // rrweb's bundle sets up its CSS parser (postcss, about 70 kB) at the top level, so it is
+      // kept even though only the Replayer uses it. Marking that set-up as free of side effects
+      // (and bare property reads of it) lets the build leave it out. If a later rrweb changes
+      // shape, the pattern simply stops matching and the file is bigger, never broken.
+      plugins: [
+        {
+          name: 'recap-rrweb-pure-postcss',
+          transform(code: string, id: string) {
+            if (!/[\\/]rrweb[\\/]dist[\\/]rrweb\.js$/.test(id)) return null;
+            return code.replace(
+              /__toESM(\$1)?\(\(\/\* @__PURE__ \*\/ __commonJSMin/g,
+              (_m, n: string | undefined) => `__toESM${n ?? ''}(/* @__PURE__ */ (/* @__PURE__ */ __commonJSMin`,
+            );
+          },
+        },
+      ],
+      build: {
+        emptyOutDir: false,
+        lib: {
+          entry: resolve(__dirname, 'src/rrweb-record.ts'),
+          name: 'RecapRrweb',
+          formats: ['iife'],
+          fileName: () => 'recap-rrweb.min.js',
+        },
+        rollupOptions: {
+          treeshake: { propertyReadSideEffects: false },
+        },
+        minify: 'terser',
+        // rrweb uses class fields. Lowering them to ES2020 makes esbuild put helper functions
+        // outside the IIFE, as page globals; every browser Recap supports runs ES2022 as it is.
+        target: 'es2022',
+        reportCompressedSize: true,
+      },
+    };
+  }
+
   const scriptTag = mode === 'script-tag';
   return {
     build: {
