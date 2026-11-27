@@ -131,6 +131,27 @@ function screenStats(appId: string, since: string) {
     .sort((a, b) => b.views - a.views || b.taps - a.taps);
 }
 
+function demoUsage() {
+  const frameBytes = data.frames.reduce((n, f) => n + ((f as { image?: string | null }).image?.length ?? 0), 0);
+  const shotBytes = data.screenshots.reduce((n, s) => n + ((s as { image?: string }).image?.length ?? 0), 0);
+  const eventsBytes = data.events.length * 300;
+  const sessionsBytes = data.sessions.length * 500;
+  const today = new Date().toISOString().slice(0, 10);
+  const recapBytes = frameBytes + shotBytes + eventsBytes + sessionsBytes;
+  return {
+    databaseBytes: recapBytes + 12 * 1024 * 1024,
+    recapBytes,
+    sessionsBytes,
+    eventsBytes,
+    framesBytes: frameBytes,
+    screenshotsBytes: shotBytes,
+    sessions: data.sessions.length,
+    sessionsToday: data.sessions.filter((s) => s.started_at.slice(0, 10) === today).length,
+    sessionsWithReplay: new Set(data.frames.map((f) => (f as { session_id: string }).session_id)).size,
+    oldestSession: data.sessions.reduce<string | null>((m, s) => (m == null || s.started_at < m ? s.started_at : m), null),
+  };
+}
+
 export const demoFetch: typeof fetch = async (input, init) => {
   const req = new Request(input, init);
   const url = new URL(req.url);
@@ -151,6 +172,16 @@ export const demoFetch: typeof fetch = async (input, init) => {
     if (name === 'recap_breakdown') return json(local.breakdown(all(), args));
     if (name === 'recap_funnel') return json(local.funnel(all(), args));
     if (name === 'recap_retention') return json(local.retention(all(), args));
+    if (name === 'recap_storage_usage') return json(demoUsage());
+    if (name === 'recap_purge_now') {
+      const keep = data.settings.keep_days;
+      if (keep == null) return json(0);
+      const cutoff = Date.now() - keep * 86_400_000;
+      const before = data.sessions.length;
+      data.sessions = data.sessions.filter((s) => Date.parse(s.started_at) >= cutoff);
+      data.settings.last_purge_at = new Date().toISOString();
+      return json(before - data.sessions.length);
+    }
     if (path === 'rpc/recap_forget_user') {
       const before = data.sessions.length;
       data.sessions = data.sessions.filter((s) => s.user_id !== body.p_user_id);
@@ -170,7 +201,9 @@ export const demoFetch: typeof fetch = async (input, init) => {
             ? (data.screenshots as unknown as Row[])
             : path === 'recap_frames'
               ? (data.frames as unknown as Row[])
-              : undefined;
+              : path === 'recap_settings'
+                ? [data.settings as unknown as Row]
+                : undefined;
   if (!table) return json({ message: 'not found' }, {}, 404);
 
   if (method === 'GET' || method === 'HEAD') {
@@ -184,6 +217,10 @@ export const demoFetch: typeof fetch = async (input, init) => {
     const body = (await req.json()) as { email: string; role: 'viewer' | 'admin' };
     data.members.push({ ...body, created_at: new Date().toISOString() });
     return json(undefined, {}, 201);
+  }
+  if (method === 'PATCH' && path === 'recap_settings') {
+    Object.assign(data.settings, (await req.json()) as Row);
+    return json(undefined, {}, 204);
   }
   if (method === 'DELETE') {
     const gone = new Set(query(table, url.searchParams));

@@ -6,6 +6,8 @@
 | Database: ingest, counters, app isolation, anon can't read, only team members can read, viewers can't delete, admin tools, retention | SQL checks on a real Postgres | `supabase/tests/security.sql` |
 | Analytics and screen pictures: event names, funnel, retention, properties, pictures replace older ones, non-images refused, anon and strangers see nothing | SQL checks on a real Postgres | `supabase/tests/analytics-and-screens.sql` |
 | Recordings: frames stored only for a known session of the same app, non-images refused, anon and strangers can't read, viewers can't delete, frames deleted with their session | SQL checks on a real Postgres | `supabase/tests/recordings.sql` |
+| Storage limits: defaults, only admins change them, sessions and replays sampled, daily cap, size cap, frame cap, refused sessions dropped quietly, old data deleted automatically and by "Delete old data now" | SQL checks on a real Postgres | `supabase/tests/storage-limits.sql` |
+| Storage page form: values checked and converted, sizes formatted | 3 unit tests | `dashboard/tests/storage-form.test.ts` |
 | Analytics numbers: the database functions and the demo's copies give identical results for trends, breakdowns, funnels and retention on 151 sample sessions | 13 checks against a real Postgres | `dashboard/tests/analytics-parity.test.ts` |
 | AI summary built from mobile events | 3 unit tests | `dashboard/tests/` |
 | **End to end**: SDK inside a real Expo app → HTTP → database | Playwright taps through the app as two users on a phone-sized screen, one starting offline; screen pictures and recording frames (including a privacy pause on checkout) are sent and stored too | `examples/expo-test-shop/` |

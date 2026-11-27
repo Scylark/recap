@@ -2,6 +2,7 @@
 //   * "test-shop": the real sessions captured by the end-to-end test (SDK in an Expo app → database).
 //   * "demo-shop": generated sample sessions for a fuller picture.
 
+import type { StorageSettings } from '../lib/data';
 import type { EventRow, Member, SessionRow } from '../lib/types';
 import e2e from './e2e-run.json';
 
@@ -11,6 +12,7 @@ export interface Dataset {
   members: Member[];
   screenshots: ScreenshotRow[];
   frames: FrameRow[];
+  settings: StorageSettings;
 }
 
 export interface FrameRow {
@@ -222,6 +224,18 @@ export function buildDataset(now = Date.now()): Dataset {
       { email: 'design@example.com', role: 'viewer', created_at: new Date(now - 86_400_000).toISOString() },
     ],
     frames: demoFrames(g.sessions, g.events),
+    settings: {
+      id: 1,
+      keep_days: 90,
+      session_sample: 1,
+      replay_sample: 1,
+      max_frames: 600,
+      daily_sessions: null,
+      max_db_mb: 400,
+      last_purge_at: null,
+      updated_at: new Date(now - 86_400_000).toISOString(),
+      updated_by: null,
+    },
     screenshots: Object.keys(SCREENS).map((screen) => ({
       app_id: 'demo-shop',
       screen,
