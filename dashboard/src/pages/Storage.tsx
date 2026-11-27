@@ -116,7 +116,7 @@ export function Storage({ isAdmin, me }: { isAdmin: boolean; me: string }) {
         {u && (
           <p className="muted small">
             {u.sessions.toLocaleString()} sessions ({u.sessionsToday.toLocaleString()} today),{' '}
-            {u.sessionsWithReplay.toLocaleString()} with a replay. Replays {mb(u.framesBytes)}, events{' '}
+            {u.sessionsWithReplay.toLocaleString()} with a replay. App replays {mb(u.framesBytes)},{u.webReplayBytes ? ` web replays ${mb(u.webReplayBytes)},` : ''} events{' '}
             {mb(u.eventsBytes)}, heatmap pictures {mb(u.screenshotsBytes)}.
             {u.oldestSession && ` Oldest session ${formatDateTime(u.oldestSession)}.`}
           </p>

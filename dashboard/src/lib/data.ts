@@ -295,6 +295,8 @@ export interface StorageUsage {
   sessionsBytes: number;
   eventsBytes: number;
   framesBytes: number;
+  /** Web page recordings. Missing on databases without the web recordings limits migration. */
+  webReplayBytes?: number;
   screenshotsBytes: number;
   sessions: number;
   sessionsToday: number;
