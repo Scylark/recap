@@ -65,7 +65,7 @@ your own phone in about 20 minutes: [docs/try-it-on-your-phone.md](./docs/try-it
 ## Websites and web apps in the same dashboard (beta)
 
 The web script can send sessions to the same Supabase project and dashboard as your mobile apps, so web,
-iOS and Android sit side by side in one set of analytics. Leave `remote` out and Recap keeps working the
+iOS and Android sit side by side in one set of analytics. Leave `supabase` out and Recap keeps working the
 original way, with nothing leaving the browser.
 
 ```js
@@ -73,11 +73,9 @@ import Recap from 'recap-ux';
 import { record } from 'rrweb'; // optional: page recordings for replay
 
 Recap.init({
-  remote: {
-    appId: 'my-site',
-    supabase: { url: 'https://your-project.supabase.co', anonKey: 'sb_publishable_…' },
-    recordings: { record }, // leave out for analytics and heatmaps only
-  },
+  appId: 'my-site',
+  supabase: { url: 'https://your-project.supabase.co', anonKey: 'sb_publishable_…' },
+  recordings: { record }, // leave out for analytics and heatmaps only
 });
 Recap.track('signed_up', { plan: 'pro' }); // custom events for funnels
 ```
@@ -133,6 +131,7 @@ All options are `data-*` attributes on the script tag:
 | `data-supabase-key` | none | Your Supabase **public anon or publishable key**. Never the service role key |
 | `data-app-id` | page hostname | Name for this site in the dashboard, e.g. `my-shop-web` |
 | `data-app-version` | none | Your site's version, shown in the dashboard |
+| `data-recordings` | `"false"` | With Supabase set: record pages for replay in the dashboard. Load rrweb's script before Recap's |
 | `data-endpoint` | none | URL to POST captured events to in batches (see [Advanced](#advanced)) |
 | `data-strip-query-params` | `"true"` | Remove query strings from recorded URLs. Set to `"false"` to keep them |
 | `data-touch-trigger` | `"true"` | Hold 3 fingers on screen to open/close the panel on touch devices |
@@ -183,7 +182,7 @@ If you use the Recap dashboard for a mobile app (see [Mobile apps](#mobile-apps-
   data-app-id="my-shop-web"></script>
 ```
 
-Pages, clicks, scroll depth and tab switches appear in the dashboard with platform `web`. Typed text is never captured. The panel and local storage keep working as before, so nothing changes for people who don't use Supabase. Replays and heatmap pictures for web are not built yet.
+Pages, clicks, scroll depth and tab switches appear in the dashboard with platform `web`. Typed text is never captured. The panel and local storage keep working as before, so nothing changes for people who don't use Supabase. For page replays and custom events, see [Websites and web apps in the same dashboard](#websites-and-web-apps-in-the-same-dashboard-beta).
 
 ## Development
 

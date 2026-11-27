@@ -6,14 +6,11 @@ import Recap from 'recap-ux';
 import { record } from 'rrweb';
 
 Recap.init({
-  remote: {
-    appId: 'web-test-shop',
-    supabase: { url: import.meta.env.VITE_RECAP_SUPABASE_URL, anonKey: import.meta.env.VITE_RECAP_SUPABASE_ANON_KEY },
-    recordings: { record },
-    appVersion: '1.0.0',
-    flushIntervalMs: 2000,
-    debug: true,
-  },
+  appId: 'web-test-shop',
+  supabase: { url: import.meta.env.VITE_RECAP_SUPABASE_URL, anonKey: import.meta.env.VITE_RECAP_SUPABASE_ANON_KEY },
+  recordings: { record },
+  appVersion: '1.0.0',
+  debug: true,
 });
 
 const PRODUCTS = [

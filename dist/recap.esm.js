@@ -244,7 +244,7 @@ function initClickCapture(handler, stripQuery = true) {
     _handler$2 = null;
   };
 }
-const MILESTONES = [25, 50, 75, 100];
+const MILESTONES$1 = [25, 50, 75, 100];
 const INCREMENT_THRESHOLD = 5;
 let _handler$1 = null;
 let _stripQuery$1 = true;
@@ -300,7 +300,7 @@ function createSentinels() {
     document.body.scrollHeight,
     document.documentElement.scrollHeight
   );
-  _sentinels = MILESTONES.map((pct) => {
+  _sentinels = MILESTONES$1.map((pct) => {
     const el = document.createElement("div");
     el.setAttribute("aria-hidden", "true");
     el.setAttribute("data-recap-sentinel", String(pct));
@@ -327,7 +327,7 @@ function recalculateSentinelPositions() {
     document.documentElement.scrollHeight
   );
   _sentinels.forEach((s, i) => {
-    const pct = MILESTONES[i] ?? 100;
+    const pct = MILESTONES$1[i] ?? 100;
     s.style.top = `${Math.floor(docHeight * pct / 100)}px`;
   });
 }
@@ -586,13 +586,13 @@ function openDB() {
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, {
+        const store2 = db.createObjectStore(STORE_NAME, {
           keyPath: "id",
           autoIncrement: true
         });
-        store.createIndex("sessionId", "sessionId", { unique: false });
-        store.createIndex("timestamp", "timestamp", { unique: false });
-        store.createIndex("type", "type", { unique: false });
+        store2.createIndex("sessionId", "sessionId", { unique: false });
+        store2.createIndex("timestamp", "timestamp", { unique: false });
+        store2.createIndex("type", "type", { unique: false });
       }
     };
     req.onsuccess = (e) => resolve(e.target.result);
@@ -620,8 +620,8 @@ async function saveEvents(events) {
   }
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-    events.forEach((e) => store.add(e));
+    const store2 = tx.objectStore(STORE_NAME);
+    events.forEach((e) => store2.add(e));
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
@@ -732,131 +732,6 @@ async function sendBeaconBatch(events) {
 }
 function hasEndpoint() {
   return _endpoint !== null;
-}
-const WEB_SDK_VERSION = "web-1.2.0";
-const START_KEY = "recap-session-start";
-let _target = null;
-function setSupabase(target) {
-  _target = { ...target, url: target.url.replace(/\/+$/, "") };
-  sessionStartMs(typeof performance !== "undefined" ? Math.round(performance.timeOrigin) : Date.now());
-}
-function hasSupabase() {
-  return _target !== null;
-}
-function sessionStartMs(now = Date.now()) {
-  try {
-    const stored = Number(sessionStorage.getItem(START_KEY));
-    if (stored > 0) return stored;
-    sessionStorage.setItem(START_KEY, String(now));
-  } catch {
-  }
-  return now;
-}
-function describeBrowser(ua) {
-  const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Browser";
-  const os = /iPhone|iPad|iPod/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Mac OS X/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : null;
-  return os ? `${browser} on ${os}` : browser;
-}
-const clamp01 = (n) => n < 0 ? 0 : n > 1 ? 1 : Math.round(n * 1e3) / 1e3;
-function toIngestEvents(events, timeOrigin, startMs) {
-  const out = [];
-  for (const e of events) {
-    const wall = Math.round(timeOrigin + e.timestamp);
-    const base = { t: Math.max(0, wall - startMs), at: new Date(wall).toISOString(), screen: e.url || null };
-    const w = e.viewport.width || 1;
-    const h = e.viewport.height || 1;
-    switch (e.type) {
-      case "navigation":
-        out.push({ ...base, type: "screen", screen: e.to || e.url || null, data: { from: e.from || null, method: e.method } });
-        break;
-      case "click":
-        out.push({
-          ...base,
-          type: "tap",
-          data: {
-            x: Math.round(e.clientX),
-            y: Math.round(e.clientY),
-            nx: clamp01(e.clientX / w),
-            ny: clamp01(e.clientY / h),
-            pageX: Math.round(e.pageX),
-            pageY: Math.round(e.pageY),
-            label: e.label,
-            selector: e.selector,
-            tag: e.tagName
-          }
-        });
-        break;
-      case "scroll":
-        out.push({ ...base, type: "scroll", data: { depth: e.depth, maxDepth: e.maxDepth } });
-        break;
-      case "visibility":
-        out.push({ ...base, type: "app_state", data: { state: e.state === "hidden" ? "background" : "active" } });
-        break;
-    }
-  }
-  return out;
-}
-function buildBatch(events, ctx) {
-  const vw = typeof window !== "undefined" ? window.innerWidth : 0;
-  const vh = typeof window !== "undefined" ? window.innerHeight : 0;
-  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
-  return {
-    appId: ctx.appId,
-    sdkVersion: WEB_SDK_VERSION,
-    session: {
-      id: ctx.sessionId,
-      startedAt: new Date(ctx.startMs).toISOString(),
-      userId: null,
-      anonymousId: null,
-      device: {
-        platform: "web",
-        osVersion: null,
-        model: describeBrowser(ua),
-        appVersion: ctx.appVersion ?? null,
-        screenWidth: vw,
-        screenHeight: vh,
-        locale: typeof navigator !== "undefined" ? navigator.language ?? null : null
-      }
-    },
-    events: toIngestEvents(events, ctx.timeOrigin, ctx.startMs)
-  };
-}
-let _pending = [];
-async function sendToSupabase(events, sessionId) {
-  if (!_target) return;
-  const all = _pending.concat(events);
-  _pending = [];
-  if (all.length === 0) return;
-  for (let i = 0; i < all.length; i += 200) {
-    try {
-      await postBatch(all.slice(i, i + 200), sessionId);
-    } catch (err) {
-      _pending = all.slice(i).slice(-1e3);
-      console.warn(String(err));
-      return;
-    }
-  }
-}
-async function postBatch(events, sessionId) {
-  const t = _target;
-  const batch = buildBatch(events, {
-    appId: t.appId,
-    appVersion: t.appVersion,
-    sessionId,
-    startMs: sessionStartMs(),
-    timeOrigin: performance.timeOrigin
-  });
-  if (batch.events.length === 0) return;
-  const headers = { "Content-Type": "application/json", apikey: t.anonKey };
-  if (t.anonKey.startsWith("eyJ")) headers["Authorization"] = `Bearer ${t.anonKey}`;
-  const body = JSON.stringify({ payload: batch });
-  const res = await fetch(`${t.url}/rest/v1/rpc/recap_ingest`, {
-    method: "POST",
-    headers,
-    body,
-    keepalive: body.length < 6e4
-  });
-  if (!res.ok) throw new Error(`[Recap] Supabase upload failed with HTTP ${res.status}`);
 }
 const PROMPT_TEMPLATE = `You are a UX researcher analysing a usability test session for a web application prototype.
 
@@ -1802,11 +1677,11 @@ const BRIEF_VISIT_S = 2;
 function generateTimeline(events, isCurrentSession = false) {
   if (events.length === 0) return [];
   const sorted = events.slice().sort((a, b) => a.timestamp - b.timestamp);
-  const sessionStartMs2 = sorted[0].timestamp;
+  const sessionStartMs = sorted[0].timestamp;
   const lastEventMs = sorted[sorted.length - 1].timestamp;
   const navEvents = sorted.filter((e) => e.type === "navigation");
   if (navEvents.length === 0) {
-    const duration = isCurrentSession ? null : (lastEventMs - sessionStartMs2) / 1e3;
+    const duration = isCurrentSession ? null : (lastEventMs - sessionStartMs) / 1e3;
     const tags = [];
     if (!isCurrentSession) tags.push("end of session");
     return [{
@@ -1823,7 +1698,7 @@ function generateTimeline(events, isCurrentSession = false) {
   if (firstNav.method === "pageload") {
     pages.push({ path: firstNav.to, arrivalMs: firstNav.timestamp });
   } else {
-    pages.push({ path: firstNav.from, arrivalMs: sessionStartMs2 });
+    pages.push({ path: firstNav.from, arrivalMs: sessionStartMs });
     pages.push({ path: firstNav.to, arrivalMs: firstNav.timestamp });
   }
   for (let i = 1; i < navEvents.length; i++) {
@@ -1853,7 +1728,7 @@ function generateTimeline(events, isCurrentSession = false) {
     if (isLast && !isCurrentSession) tags.push("end of session");
     return {
       pagePath: page.path,
-      arrivalTime: (page.arrivalMs - sessionStartMs2) / 1e3,
+      arrivalTime: (page.arrivalMs - sessionStartMs) / 1e3,
       duration,
       visitNumber,
       isRevisit,
@@ -1861,9 +1736,9 @@ function generateTimeline(events, isCurrentSession = false) {
     };
   });
 }
-function visitWindowMs(visit, sessionStartMs2, isLastVisit) {
-  const visitStartMs = sessionStartMs2 + visit.arrivalTime * 1e3;
-  const visitEndMs = isLastVisit || visit.duration === null ? null : sessionStartMs2 + (visit.arrivalTime + visit.duration) * 1e3;
+function visitWindowMs(visit, sessionStartMs, isLastVisit) {
+  const visitStartMs = sessionStartMs + visit.arrivalTime * 1e3;
+  const visitEndMs = isLastVisit || visit.duration === null ? null : sessionStartMs + (visit.arrivalTime + visit.duration) * 1e3;
   return { visitStartMs, visitEndMs };
 }
 function eventsInVisit(events, visit) {
@@ -2912,8 +2787,8 @@ function bindEvents(root) {
       if (!visit) return;
       const totalVisits = timeline.filter((v) => v.pagePath === visit.pagePath).length;
       const label = totalVisits > 1 ? `visit ${visit.visitNumber} of ${totalVisits}` : "";
-      const sessionStartMs2 = _allEvents.reduce((min, e) => Math.min(min, e.timestamp), Infinity);
-      const range = visitWindowMs(visit, sessionStartMs2, visitIndex === timeline.length - 1);
+      const sessionStartMs = _allEvents.reduce((min, e) => Math.min(min, e.timestamp), Infinity);
+      const range = visitWindowMs(visit, sessionStartMs, visitIndex === timeline.length - 1);
       _heatmapFilter = { pagePath: visit.pagePath, ...range, label };
       if (location.pathname !== visit.pagePath) {
         (_origPushState ?? history.pushState).call(history, null, "", visit.pagePath);
@@ -3115,38 +2990,357 @@ function initTouchTrigger(onTrigger, options = {}) {
     document.removeEventListener("touchcancel", onTouchEndOrCancel);
   };
 }
+const REMOTE_SDK_VERSION = "web-0.1.0";
+const KEY_START = "recap-remote-start";
+const KEY_UPLOADED = "recap-remote-uploaded";
+const KEY_SAMPLED = "recap-remote-sampled";
+const KEY_ANON = "recap-remote-anon";
+const MILESTONES = [25, 50, 75, 100];
+const MAX_BATCH = 200;
+const KEEPALIVE_LIMIT = 6e4;
+const DOM_CHUNK_BYTES = 4e5;
+function uuid() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    return (c === "x" ? r : r & 3 | 8).toString(16);
+  });
+}
+function store(kind, key, value) {
+  try {
+    const s = kind === "session" ? sessionStorage : localStorage;
+    if (value !== void 0) s.setItem(key, value);
+    return s.getItem(key);
+  } catch {
+    return value ?? null;
+  }
+}
+function browserInfo() {
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  const model = /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : null;
+  const os = /iPhone|iPad/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Mac OS X/.test(ua) ? "macOS" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : null;
+  return { model, os };
+}
+class RemoteSink {
+  constructor(config, fetchFn = (...a) => fetch(...a)) {
+    this.queue = [];
+    this.screen = null;
+    this.scrollMax = /* @__PURE__ */ new Map();
+    this.chain = Promise.resolve();
+    this.timer = null;
+    this.stopFns = [];
+    this.domBuffer = [];
+    this.domBytes = 0;
+    this.domSending = false;
+    this.stopRecording = null;
+    if (!config.appId) throw new Error("Recap: remote.appId is required");
+    if (!config.supabase && !config.endpoint) throw new Error("Recap: remote needs supabase or endpoint");
+    this.config = config;
+    this.fetchFn = fetchFn;
+    this.sessionId = getSessionId();
+    const savedStart = Number(store("session", KEY_START));
+    this.startMs = savedStart > 0 ? savedStart : Date.now();
+    if (!(savedStart > 0)) store("session", KEY_START, String(this.startMs));
+    this.uploaded = store("session", KEY_UPLOADED) === this.sessionId;
+    const savedSample = store("session", KEY_SAMPLED);
+    this.sampled = savedSample !== null ? savedSample === "1" : Math.random() < (config.sampleRate ?? 1);
+    store("session", KEY_SAMPLED, this.sampled ? "1" : "0");
+  }
+  /** Start sending. Returns false if this session wasn't sampled. */
+  start() {
+    if (!this.sampled) return false;
+    this.timer = setInterval(() => void this.flush(), this.config.flushIntervalMs ?? 5e3);
+    const onVis = () => {
+      const hidden = document.visibilityState === "hidden";
+      this.push("app_state", { state: hidden ? "background" : "active" });
+      if (hidden) this.flushOnExit();
+    };
+    const onHide = () => this.flushOnExit();
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", onHide);
+    this.stopFns.push(
+      () => document.removeEventListener("visibilitychange", onVis),
+      () => window.removeEventListener("pagehide", onHide)
+    );
+    this.startRecording();
+    this.log(`session ${this.sessionId} sending to the dashboard`);
+    return true;
+  }
+  stop() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    this.stopRecording?.();
+    this.stopRecording = null;
+    this.stopFns.forEach((f) => f());
+    this.stopFns = [];
+    void this.flush();
+  }
+  getSessionId() {
+    return this.sessionId;
+  }
+  /** Feed one event from the web tracker's capture layers. */
+  handle(event) {
+    if (!this.sampled) return;
+    switch (event.type) {
+      case "navigation": {
+        if (event.to === this.screen) return;
+        const from = this.screen;
+        this.screen = event.to;
+        this.push("screen", { from, method: event.method });
+        return;
+      }
+      case "click": {
+        const w = window.innerWidth || 1;
+        const h = window.innerHeight || 1;
+        this.push("tap", {
+          x: Math.round(event.clientX),
+          y: Math.round(event.clientY),
+          nx: Math.min(1, Math.max(0, event.clientX / w)),
+          ny: Math.min(1, Math.max(0, event.clientY / h)),
+          label: event.label,
+          selector: event.selector,
+          tag: event.tagName,
+          pageY: Math.round(event.pageY)
+        });
+        return;
+      }
+      case "scroll": {
+        const key = this.screen ?? "";
+        const prev = this.scrollMax.get(key) ?? 0;
+        const d = Math.max(0, Math.min(100, Math.round(event.depth)));
+        if (d <= prev) return;
+        this.scrollMax.set(key, d);
+        const crossed = MILESTONES.filter((m) => prev < m && d >= m);
+        if (crossed.length) this.push("scroll", { depth: crossed[crossed.length - 1], maxDepth: d });
+        return;
+      }
+      default:
+        return;
+    }
+  }
+  /** A custom event, e.g. track('added_to_basket', { sku: 'A1' }). */
+  track(name, props = {}) {
+    if (!this.sampled || !name) return;
+    this.push("custom", { name, ...props });
+  }
+  pending() {
+    return this.queue;
+  }
+  push(type, data) {
+    const now = Date.now();
+    this.queue.push({ type, t: Math.max(0, now - this.startMs), at: new Date(now).toISOString(), screen: this.screen, data });
+    if (this.queue.length > 1e3) this.queue.splice(0, this.queue.length - 1e3);
+    if (type === "screen" && !this.uploaded) void this.flush();
+  }
+  batch(events) {
+    const { model, os } = browserInfo();
+    let anon = store("local", KEY_ANON);
+    if (!anon) anon = store("local", KEY_ANON, uuid());
+    return {
+      appId: this.config.appId,
+      sdkVersion: REMOTE_SDK_VERSION,
+      session: {
+        id: this.sessionId,
+        startedAt: new Date(this.startMs).toISOString(),
+        userId: null,
+        anonymousId: anon,
+        device: {
+          platform: "web",
+          osVersion: os,
+          model,
+          appVersion: this.config.appVersion ?? null,
+          screenWidth: window.innerWidth,
+          screenHeight: window.innerHeight,
+          locale: typeof navigator !== "undefined" ? navigator.language : null
+        }
+      },
+      events
+    };
+  }
+  target(kind) {
+    const { supabase, endpoint } = this.config;
+    if (supabase) {
+      const base = supabase.url.replace(/\/+$/, "");
+      const key = supabase.anonKey;
+      const headers = key.startsWith("eyJ") ? { apikey: key, Authorization: `Bearer ${key}` } : { apikey: key };
+      return { url: `${base}/rest/v1/rpc/${kind === "ingest" ? "recap_ingest" : "recap_dom"}`, headers };
+    }
+    if (endpoint) {
+      const url = kind === "ingest" ? endpoint.url : endpoint.recordingsUrl;
+      return url ? { url, headers: endpoint.headers ?? {} } : null;
+    }
+    return null;
+  }
+  async post(kind, body, keepalive = false) {
+    const target = this.target(kind);
+    if (!target) return;
+    const payload = this.config.supabase ? { payload: body } : body;
+    const res = await this.fetchFn(target.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...target.headers },
+      body: JSON.stringify(payload),
+      keepalive
+    });
+    if (!res.ok) throw Object.assign(new Error(`Recap: upload failed with HTTP ${res.status}`), { status: res.status });
+  }
+  /** Send queued events (and recording chunks). Calls run one after another, never overlapping. */
+  flush() {
+    this.chain = this.chain.then(() => this.sendQueued()).catch(() => void 0);
+    return this.chain;
+  }
+  async sendQueued() {
+    while (this.queue.length) {
+      const events = this.queue.slice(0, MAX_BATCH);
+      try {
+        await this.post("ingest", this.batch(events));
+      } catch (err) {
+        this.log("upload failed; will retry", err);
+        return;
+      }
+      this.queue.splice(0, events.length);
+      if (!this.uploaded) {
+        this.uploaded = true;
+        store("session", KEY_UPLOADED, this.sessionId);
+      }
+      this.log(`uploaded ${events.length} events`);
+    }
+    await this.sendDom();
+  }
+  /** The page is going away: send what fits in a keepalive request. */
+  flushOnExit() {
+    if (this.queue.length) {
+      const events = this.queue.slice(0, MAX_BATCH);
+      const body = this.batch(events);
+      if (JSON.stringify(body).length < KEEPALIVE_LIMIT) {
+        this.queue.splice(0, events.length);
+        void this.post("ingest", body, true).catch(() => void 0);
+        this.uploaded = true;
+        store("session", KEY_UPLOADED, this.sessionId);
+      }
+    }
+    if (this.uploaded && this.domBuffer.length) {
+      const chunk = this.takeDomChunk(KEEPALIVE_LIMIT);
+      if (chunk.length) void this.post("dom", this.domPayload(chunk), true).catch(() => void 0);
+    }
+  }
+  // ---------------------------------------------------------------- recordings
+  startRecording() {
+    const opt = this.config.recordings;
+    if (!opt) return;
+    const o = opt === true ? {} : opt;
+    const key = "recap-remote-rec";
+    const saved = store("session", key);
+    const on = saved !== null ? saved === "1" : Math.random() < (o.sampleRate ?? 1);
+    store("session", key, on ? "1" : "0");
+    if (!on) return;
+    const record = o.record ?? globalThis.rrweb?.record;
+    if (!record) {
+      this.log("recordings are on but rrweb was not found: pass recordings.record, or load rrweb first");
+      return;
+    }
+    const block = ["[data-ut-no-track]", ".ut-block", ".recap-private", o.blockSelector].filter(Boolean).join(", ");
+    const stop = record({
+      emit: (e) => this.pushDom(e),
+      maskAllInputs: true,
+      blockSelector: block,
+      inlineStylesheet: true,
+      recordCanvas: false,
+      collectFonts: false,
+      sampling: { mousemove: 50, scroll: 100, input: "last", media: 800 },
+      slimDOMOptions: { script: true, comment: true, headFavicon: true, headWhitespace: true, headMetaSocial: true }
+    });
+    this.stopRecording = stop ?? null;
+    this.log("recording the page for replay");
+  }
+  pushDom(e) {
+    const t = Math.max(0, e.timestamp - this.startMs);
+    this.domBuffer.push({ t, e });
+    this.domBytes += JSON.stringify(e).length;
+    if (this.domBytes >= DOM_CHUNK_BYTES && this.uploaded) void this.sendDom();
+  }
+  takeDomChunk(maxBytes) {
+    const out = [];
+    let size = 0;
+    while (this.domBuffer.length) {
+      const next = this.domBuffer[0];
+      const n = JSON.stringify(next.e).length;
+      if (out.length && size + n > maxBytes) break;
+      out.push(next);
+      size += n;
+      this.domBuffer.shift();
+      this.domBytes -= n;
+    }
+    return out;
+  }
+  domPayload(chunk) {
+    return { appId: this.config.appId, sessionId: this.sessionId, t: chunk[0]?.t ?? 0, events: chunk.map((c) => c.e) };
+  }
+  async sendDom() {
+    if (this.domSending || !this.uploaded || this.domBuffer.length === 0) return;
+    this.domSending = true;
+    try {
+      while (this.domBuffer.length) {
+        const chunk = this.takeDomChunk(DOM_CHUNK_BYTES);
+        try {
+          await this.post("dom", this.domPayload(chunk));
+          this.log(`uploaded ${chunk.length} recording events`);
+        } catch (err) {
+          if (err.status === 404) {
+            this.log("recordings are off: run supabase/migrations/*_recap_dom.sql in your Supabase project");
+            this.stopRecording?.();
+            this.stopRecording = null;
+            this.domBuffer = [];
+            this.domBytes = 0;
+            break;
+          }
+          this.domBuffer.unshift(...chunk);
+          this.domBytes += chunk.reduce((n, c) => n + JSON.stringify(c.e).length, 0);
+          this.log("recording upload failed; will retry", err);
+          break;
+        }
+      }
+    } finally {
+      this.domSending = false;
+    }
+  }
+  log(msg, err) {
+    if (!this.config.debug) return;
+    if (err) console.warn(`[Recap] ${msg}`, err);
+    else console.log(`[Recap] ${msg}`);
+  }
+}
 let _initialized = false;
 let _destroyFns = [];
+let _remote = null;
+let _early = [];
+function capture(e) {
+  push(e);
+  if (_remote) _remote.handle(e);
+  else if (_early.length < 200) _early.push(e);
+}
 const Recap = {
   /**
    * Initialize the tracker with optional config.
    * Safe to call multiple times — subsequent calls are no-ops.
    */
   init(config = {}) {
+    const remote = remoteFrom(config);
+    if (remote) Recap.connect(remote);
     if (_initialized) return;
     _initialized = true;
     if (config.sessionName) setSessionName(config.sessionName);
     if (config.endpoint) setEndpoint(config.endpoint);
-    if (config.supabase?.url && config.supabase.anonKey) {
-      setSupabase({
-        url: config.supabase.url,
-        anonKey: config.supabase.anonKey,
-        appId: config.appId || (typeof location !== "undefined" ? location.hostname : "") || "web",
-        appVersion: config.appVersion
-      });
-    }
     const strip = config.stripQueryParams !== false;
     void purgeOldSessions();
     const stopBuffer = initBuffer(async (events) => {
       await saveEvents(events);
       if (hasEndpoint()) await sendBeaconBatch(events);
-      if (hasSupabase()) await sendToSupabase(events, getSessionId());
     });
     _destroyFns.push(stopBuffer);
-    const stopClicks = initClickCapture((e) => push(e), strip);
-    const stopScroll = initScrollCapture((e) => push(e), strip);
+    const stopClicks = initClickCapture(capture, strip);
+    const stopScroll = initScrollCapture(capture, strip);
     const stopNav = initNavigationCapture((e) => {
-      push(e);
+      capture(e);
       if (e.method !== "pageload") refreshScrollCapture();
     }, strip);
     _destroyFns.push(stopClicks, stopScroll, stopNav);
@@ -3189,9 +3383,29 @@ const Recap = {
       if (document.visibilityState === "hidden") void flush();
     });
   },
+  /**
+   * Send this session to your Recap dashboard as well (Supabase or an endpoint). Safe to call more
+   * than once; only the first call connects.
+   */
+  connect(config) {
+    if (_remote) return;
+    try {
+      const sink = new RemoteSink(config);
+      if (!sink.start()) return;
+      _remote = sink;
+      for (const e of _early) sink.handle(e);
+      _early = [];
+    } catch (err) {
+      console.error("[Recap] Could not connect:", err);
+    }
+  },
+  /** Record a custom event, e.g. Recap.track('added_to_basket', { sku: 'A1' }). Sent only when connected. */
+  track(name, props = {}) {
+    _remote?.track(name, props);
+  },
   /** Manually flush the event buffer. */
   flush() {
-    return flush();
+    return Promise.all([flush(), _remote?.flush()]).then(() => void 0);
   },
   /** Get the current session ID. */
   getSessionId() {
@@ -3225,9 +3439,23 @@ const Recap = {
   destroy() {
     _destroyFns.forEach((fn) => fn());
     _destroyFns = [];
+    _remote?.stop();
+    _remote = null;
+    _early = [];
     _initialized = false;
   }
 };
+function remoteFrom(config) {
+  if (config.remote) return config.remote;
+  if (!config.supabase?.url || !config.supabase.anonKey) return null;
+  return {
+    appId: config.appId || (typeof location !== "undefined" ? location.hostname : "") || "web",
+    supabase: { url: config.supabase.url, anonKey: config.supabase.anonKey },
+    ...config.appVersion ? { appVersion: config.appVersion } : {},
+    ...config.recordings ? { recordings: config.recordings } : {},
+    ...config.debug ? { debug: true } : {}
+  };
+}
 function matchesShortcut(e, shortcut) {
   const isMac = typeof navigator !== "undefined" && (navigator.platform?.toLowerCase().includes("mac") || navigator.userAgentData?.platform?.toLowerCase().includes("mac"));
   const parts = shortcut.toUpperCase().split("+");
@@ -3264,6 +3492,7 @@ function readScriptConfig() {
   }
   if (el.dataset["appId"]) config.appId = el.dataset["appId"];
   if (el.dataset["appVersion"]) config.appVersion = el.dataset["appVersion"];
+  if (el.dataset["recordings"] === "true") config.recordings = true;
   if (el.dataset["shortcut"]) config.shortcut = el.dataset["shortcut"];
   if (el.dataset["stripQueryParams"] === "false") config.stripQueryParams = false;
   if (el.dataset["touchTrigger"] === "false") config.touchTrigger = false;

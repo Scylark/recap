@@ -1,3 +1,5 @@
+import type { RemoteConfig, RemoteRecordingOptions } from './remote/remote.js';
+export type { RemoteConfig, RemoteRecordingOptions, RrwebRecord } from './remote/remote.js';
 export type EventType = 'click' | 'scroll' | 'navigation' | 'visibility' | 'resize';
 export interface Viewport {
     width: number;
@@ -64,6 +66,15 @@ export interface RecapConfig {
     appId?: string;
     /** Your site's version, shown in the dashboard. Script tag: data-app-version. */
     appVersion?: string;
+    /**
+     * With `supabase`: record the page for session replay in the dashboard, using rrweb. Pass
+     * `{ record }` from `import { record } from 'rrweb'`, or load rrweb's script first and use `true`.
+     * Every form field is masked; anything with class "recap-private" or data-ut-no-track is left out.
+     * Script tag: data-recordings="true".
+     */
+    recordings?: boolean | RemoteRecordingOptions;
+    /** Log what's sent to the dashboard in the console. */
+    debug?: boolean;
     shortcut?: string;
     stripQueryParams?: boolean;
     /** Enable the touch-hold gesture that opens/closes the panel on touch devices. Default: true. */
@@ -72,6 +83,8 @@ export interface RecapConfig {
     touchTriggerFingers?: number;
     /** Milliseconds the touch points must be held before the panel toggles. Default: 1500. */
     touchTriggerHoldMs?: number;
+    /** Advanced: full dashboard settings (sampling, flush interval, your own endpoint). Overrides `supabase`. */
+    remote?: RemoteConfig;
 }
 export interface SessionSummary {
     meta: {

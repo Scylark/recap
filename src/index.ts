@@ -9,7 +9,6 @@ import { initNavigationCapture } from './capture/navigation.js';
 import { initBuffer, flush, push, getBuffer } from './storage/buffer.js';
 import { saveEvents, purgeOldSessions } from './storage/idb.js';
 import { setEndpoint, sendBeaconBatch, hasEndpoint } from './storage/beacon.js';
-import { setSupabase, hasSupabase, sendToSupabase } from './storage/supabase.js';
 import { openPanel, closePanel, isPanelOpen } from './viz/panel.js';
 import { initTouchTrigger, type TouchTriggerOptions } from './capture/touch-trigger.js';
 import { summarize } from './analysis/summarize.js';
@@ -38,22 +37,15 @@ export const Recap = {
    * Safe to call multiple times — subsequent calls are no-ops.
    */
   init(config: RecapConfig = {}): void {
-    // Loading the module auto-starts Recap; a later init() with `remote` still connects it.
-    if (config.remote) Recap.connect(config.remote);
+    // Loading the module auto-starts Recap; a later init() with Supabase settings still connects it.
+    const remote = remoteFrom(config);
+    if (remote) Recap.connect(remote);
     if (_initialized) return;
     _initialized = true;
 
     // Apply config
     if (config.sessionName) setSessionName(config.sessionName);
     if (config.endpoint) setEndpoint(config.endpoint);
-    if (config.supabase?.url && config.supabase.anonKey) {
-      setSupabase({
-        url: config.supabase.url,
-        anonKey: config.supabase.anonKey,
-        appId: config.appId || (typeof location !== 'undefined' ? location.hostname : '') || 'web',
-        appVersion: config.appVersion,
-      });
-    }
 
     const strip = config.stripQueryParams !== false; // default true
 
@@ -64,7 +56,6 @@ export const Recap = {
     const stopBuffer = initBuffer(async (events: AnyEvent[]) => {
       await saveEvents(events);
       if (hasEndpoint()) await sendBeaconBatch(events);
-      if (hasSupabase()) await sendToSupabase(events, getSessionId());
     });
     _destroyFns.push(stopBuffer);
 
@@ -202,6 +193,21 @@ export const Recap = {
   },
 };
 
+// --- Dashboard connection ---
+
+/** The settings for sending to the Recap dashboard, if the config has any. */
+function remoteFrom(config: RecapConfig): RemoteConfig | null {
+  if (config.remote) return config.remote;
+  if (!config.supabase?.url || !config.supabase.anonKey) return null;
+  return {
+    appId: config.appId || (typeof location !== 'undefined' ? location.hostname : '') || 'web',
+    supabase: { url: config.supabase.url, anonKey: config.supabase.anonKey },
+    ...(config.appVersion ? { appVersion: config.appVersion } : {}),
+    ...(config.recordings ? { recordings: config.recordings } : {}),
+    ...(config.debug ? { debug: true } : {}),
+  };
+}
+
 // --- Keyboard shortcut matching ---
 
 function matchesShortcut(e: KeyboardEvent, shortcut: string): boolean {
@@ -264,6 +270,8 @@ function readScriptConfig(): RecapConfig {
   }
   if (el.dataset['appId']) config.appId = el.dataset['appId'];
   if (el.dataset['appVersion']) config.appVersion = el.dataset['appVersion'];
+  // Page recordings need rrweb loaded on the page first (window.rrweb).
+  if (el.dataset['recordings'] === 'true') config.recordings = true;
   if (el.dataset['shortcut']) config.shortcut = el.dataset['shortcut'];
   if (el.dataset['stripQueryParams'] === 'false') config.stripQueryParams = false;
   if (el.dataset['touchTrigger'] === 'false') config.touchTrigger = false;
@@ -274,19 +282,6 @@ function readScriptConfig(): RecapConfig {
     config.touchTriggerHoldMs = parseInt(el.dataset['touchTriggerHoldMs'], 10);
   }
 
-  // Remote mode: <script src="recap.min.js" data-app-id="my-site" data-supabase-url="…" data-supabase-key="…">
-  const appId = el.dataset['appId'];
-  const url = el.dataset['supabaseUrl'];
-  const anonKey = el.dataset['supabaseKey'];
-  if (appId && url && anonKey) {
-    config.remote = {
-      appId,
-      supabase: { url, anonKey },
-      ...(el.dataset['recordings'] === 'true' ? { recordings: true } : {}),
-      ...(el.dataset['appVersion'] ? { appVersion: el.dataset['appVersion'] } : {}),
-      ...(el.dataset['debug'] === 'true' ? { debug: true } : {}),
-    };
-  }
 
   return config;
 }

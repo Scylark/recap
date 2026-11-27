@@ -1,7 +1,7 @@
 // Recap UX — shared TypeScript interfaces
 // All types are self-contained — no external type dependencies.
 
-import type { RemoteConfig } from './remote/remote.js';
+import type { RemoteConfig, RemoteRecordingOptions } from './remote/remote.js';
 export type { RemoteConfig, RemoteRecordingOptions, RrwebRecord } from './remote/remote.js';
 
 export type EventType = 'click' | 'scroll' | 'navigation' | 'visibility' | 'resize';
@@ -89,6 +89,15 @@ export interface RecapConfig {
   appId?: string;
   /** Your site's version, shown in the dashboard. Script tag: data-app-version. */
   appVersion?: string;
+  /**
+   * With `supabase`: record the page for session replay in the dashboard, using rrweb. Pass
+   * `{ record }` from `import { record } from 'rrweb'`, or load rrweb's script first and use `true`.
+   * Every form field is masked; anything with class "recap-private" or data-ut-no-track is left out.
+   * Script tag: data-recordings="true".
+   */
+  recordings?: boolean | RemoteRecordingOptions;
+  /** Log what's sent to the dashboard in the console. */
+  debug?: boolean;
   shortcut?: string; // override keyboard shortcut
   stripQueryParams?: boolean; // default true
 
@@ -99,11 +108,7 @@ export interface RecapConfig {
   /** Milliseconds the touch points must be held before the panel toggles. Default: 1500. */
   touchTriggerHoldMs?: number;
 
-  /**
-   * Also send sessions to your own Supabase project (or an endpoint), for the Recap dashboard:
-   * analytics, funnels, heatmaps and page replays next to your iOS and Android sessions.
-   * Leave it out and nothing leaves the browser.
-   */
+  /** Advanced: full dashboard settings (sampling, flush interval, your own endpoint). Overrides `supabase`. */
   remote?: RemoteConfig;
 }
 
