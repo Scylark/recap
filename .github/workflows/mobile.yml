@@ -2,9 +2,9 @@ name: Mobile SDK, dashboard and database
 
 on:
   push:
-    paths: ['sdk-react-native/**', 'dashboard/**', 'supabase/**', 'src/analysis/**', 'src/types.ts', '.github/workflows/mobile.yml']
+    paths: ['sdk-react-native/**', 'dashboard/**', 'supabase/**', 'scripts/**', 'src/analysis/**', 'src/types.ts', '.github/workflows/mobile.yml']
   pull_request:
-    paths: ['sdk-react-native/**', 'dashboard/**', 'supabase/**', 'src/analysis/**', 'src/types.ts', '.github/workflows/mobile.yml']
+    paths: ['sdk-react-native/**', 'dashboard/**', 'supabase/**', 'scripts/**', 'src/analysis/**', 'src/types.ts', '.github/workflows/mobile.yml']
 
 jobs:
   sdk:
@@ -42,11 +42,20 @@ jobs:
       - uses: actions/checkout@v7
       - name: Every migration has its own version (supabase db push needs this)
         run: test -z "$(ls supabase/migrations/*.sql | xargs -n1 basename | cut -d_ -f1 | sort | uniq -d)"
+      - name: supabase/setup.sql (the one-file setup) matches the migrations
+        run: node scripts/build-setup-sql.mjs --check
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/supabase-shim.sql
       - name: Apply every migration
         run: for f in supabase/migrations/*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done
       - name: Apply them again (they must be safe to re-run)
         run: for f in supabase/migrations/*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done
+      - name: The one-file setup works on a fresh database, and runs again cleanly
+        run: |
+          psql -v ON_ERROR_STOP=1 -c 'create database setup_check'
+          PGDATABASE=setup_check psql -v ON_ERROR_STOP=1 -f supabase/tests/supabase-shim.sql
+          PGDATABASE=setup_check psql -v ON_ERROR_STOP=1 -f supabase/setup.sql
+          PGDATABASE=setup_check psql -v ON_ERROR_STOP=1 -f supabase/setup.sql
+          PGDATABASE=setup_check psql -v ON_ERROR_STOP=1 -tAc "select count(distinct p.proname) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname like 'recap\_%'" | grep -qx 25
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/security.sql
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/analytics-and-screens.sql
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/recordings.sql
