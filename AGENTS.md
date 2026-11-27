@@ -7,7 +7,7 @@ questions marked **Ask**, and do not skip the privacy steps.
 ## What Recap is
 
 Recap is free, open-source (MIT) session analytics for mobile apps. It records which screens people visit,
-where they tap, how far they scroll and when they leave, then shows it in a dashboard with journeys, tap
+where they tap, how far they scroll and when they leave, then shows it in a dashboard with session replays, journeys, tap
 heatmaps drawn over real screen pictures, a one-click AI summary of any session, and product analytics
 (trends, funnels, retention, breakdowns and custom events, in the style of Mixpanel).
 

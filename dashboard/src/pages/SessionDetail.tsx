@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Heatmap } from '../components/Heatmap';
-import { deleteSession, getEvents, getSession, screenshotFor } from '../lib/data';
+import { Replay } from '../components/Replay';
+import { deleteSession, getEvents, getSession, screenshotFor, screenshotsFor } from '../lib/data';
 import { summaryForAI } from '../lib/summary';
 import type { EventRow, SessionRow } from '../lib/types';
 import { formatDateTime, formatDuration, go, sessionSeconds, useAsync } from '../lib/util';
@@ -86,6 +87,8 @@ function Detail({
     () => (visit ? screenshotFor(session.app_id, visit.screen) : Promise.resolve(null)),
     [session.app_id, visit?.screen],
   );
+  const screens = useMemo(() => [...new Set(events.map((e) => e.screen).filter((x): x is string => !!x))], [events]);
+  const pictures = useAsync(() => screenshotsFor(session.app_id, screens), [session.app_id, screens.join('|')]);
   const points = (visit?.events ?? [])
     .filter((e) => e.type === 'tap')
     .map((e) => ({ nx: Number(e.data.nx ?? 0), ny: Number(e.data.ny ?? 0) }));
@@ -134,6 +137,17 @@ function Detail({
         </div>
       </div>
       {copied && <p className="ok">{copied}</p>}
+
+      <h3>Replay</h3>
+      <Replay
+        events={events}
+        durationMs={duration * 1000}
+        pictures={pictures.data ?? {}}
+        describe={describe}
+        {...(aspect ? { aspect } : {})}
+      />
+
+      <h3>Screen by screen</h3>
 
       <div className="detail">
         <ol className="journey">

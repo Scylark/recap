@@ -31,6 +31,11 @@ function test(row: Row, col: string, expr: string): boolean {
     case 'eq':
       ok = String(v) === val;
       break;
+    case 'in': {
+      const list = val.replace(/^\(|\)$/g, '').match(/"(?:[^"\\]|\\.)*"|[^,]+/g) ?? [];
+      ok = list.map((x) => (x.startsWith('"') ? x.slice(1, -1).replace(/\\"/g, '"') : x)).includes(String(v));
+      break;
+    }
     case 'gte':
       ok = String(v) >= val;
       break;

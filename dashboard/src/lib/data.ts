@@ -150,6 +150,22 @@ export async function screenshotFor(appId: string, screen: string): Promise<Scre
   return ((res.data ?? [])[0] as Screenshot | undefined) ?? null;
 }
 
+/** The newest picture of each of these screens, keyed by screen name. */
+export async function screenshotsFor(appId: string, screens: string[]): Promise<Record<string, Screenshot>> {
+  if (!screens.length) return {};
+  const res = await db()
+    .from('recap_screenshots')
+    .select('screen,image,width,height,captured_at')
+    .eq('app_id', appId)
+    .in('screen', screens)
+    .order('captured_at', { ascending: false })
+    .limit(200);
+  if (res.error) return {};
+  const out: Record<string, Screenshot> = {};
+  for (const r of (res.data ?? []) as (Screenshot & { screen: string })[]) if (!out[r.screen]) out[r.screen] = r;
+  return out;
+}
+
 export interface LabelCount {
   label: string;
   count: number;
