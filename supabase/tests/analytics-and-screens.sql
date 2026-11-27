@@ -55,7 +55,7 @@ do $$ declare n record; begin
     raise exception 'FAIL: screenshot not replaced';
   end if;
   -- Named events: unlabelled taps are left out.
-  if (select string_agg(name || ':' || events || ':' || users, ',' order by name)
+  if (select string_agg(name || ':' || events || ':' || users, ',' order by name collate "C")
       from public.recap_event_names('shop', '2026-01-01', '2027-01-01'))
      <> 'Session started:2:1,Tapped Buy:1:1,Viewed Home:2:1,order_completed:1:1' then
     raise exception 'FAIL: event names %', (select json_agg(x) from public.recap_event_names('shop', '2026-01-01', '2027-01-01') x);

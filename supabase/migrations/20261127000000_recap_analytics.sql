@@ -224,7 +224,7 @@ as $$
   from public.recap_analytics_events
   where app_id = p_app and at >= p_since and at < p_until
   group by name
-  order by count(*) desc, name
+  order by count(*) desc, name collate "C"
 $$;
 
 -- Top values of each property sent with one custom event.
@@ -244,9 +244,9 @@ as $$
       and p.key not in ('name', 'label', 'x', 'y', 'nx', 'ny', 'from')
     group by p.key, p.value
   ), ranked as (
-    select kv.*, row_number() over (partition by kv.key order by kv.n desc, kv.value) as r from kv
+    select kv.*, row_number() over (partition by kv.key order by kv.n desc, kv.value collate "C") as r from kv
   )
-  select key, value, n from ranked where r <= 10 order by key, n desc, value
+  select key, value, n from ranked where r <= 10 order by key collate "C", n desc, value collate "C"
 $$;
 
 -- ------------------------------------------------------------------ trends
@@ -281,14 +281,14 @@ as $$
       and (p_event is null or e.name = p_event)
       and public.recap_filter_ok(p_filters, e.platform, e.app_version, e.os_version, e.device_model, e.locale)
   ), top as (
-    select seg from ev group by seg order by count(*) desc, seg limit 6
+    select seg from ev group by seg order by count(*) desc, seg collate "C" limit 6
   )
   select bucket,
          case when seg in (select seg from top) then seg else 'Other' end as segment,
          case when p_measure = 'uniques' then count(distinct distinct_id) else count(*) end as value
   from ev
   group by 1, 2
-  order by 1, 2
+  order by 1, (case when seg in (select seg from top) then seg else 'Other' end) collate "C"
 $$;
 
 -- ------------------------------------------------------------------ breakdowns
@@ -314,7 +314,8 @@ as $$
     and (p_event is null or e.name = p_event)
     and public.recap_filter_ok(p_filters, e.platform, e.app_version, e.os_version, e.device_model, e.locale)
   group by 1
-  order by 2 desc, 1
+  order by 2 desc,
+    public.recap_prop(p_property, e.platform, e.app_version, e.os_version, e.device_model, e.locale, e.screen, e.data) collate "C"
   limit 50
 $$;
 
@@ -364,7 +365,7 @@ as $$
     ) n
     where f.step < cardinality(p_steps) and n.at is not null
   ), top as (
-    select seg from f where step = 1 group by seg order by count(*) desc, seg limit 6
+    select seg from f where step = 1 group by seg order by count(*) desc, seg collate "C" limit 6
   )
   select f.step,
          case when f.seg in (select seg from top) then f.seg else 'Other' end,
@@ -372,7 +373,7 @@ as $$
          case when f.step = 1 then null else avg(extract(epoch from f.t - f.prev))::double precision end
   from f
   group by 1, 2
-  order by 1, 2
+  order by 1, (case when f.seg in (select seg from top) then f.seg else 'Other' end) collate "C"
 $$;
 
 -- ------------------------------------------------------------------ retention
