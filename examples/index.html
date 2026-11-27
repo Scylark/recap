@@ -193,6 +193,9 @@
     const supabaseKey = import.meta.env?.EXPO_PUBLIC_RECAP_SUPABASE_ANON_KEY;
     Recap.init({
       showPanel: false,
+      // The panel is the point of this demo: keep it on when sessions also go to the dashboard,
+      // where it is off by default.
+      panel: true,
       sessionName: 'demo-session',
       ...(supabaseUrl && supabaseKey
         ? { supabase: { url: supabaseUrl, anonKey: supabaseKey }, appId: 'demo-web', appVersion: '1.0.0' }

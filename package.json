@@ -1,6 +1,6 @@
 {
   "name": "recap-ux",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Lightweight, privacy-first usability testing for web prototypes. Drop-in heatmaps, scroll depth, and AI-ready session exports with zero cookies and zero backend.",
   "type": "module",
   "main": "./dist/recap.cjs.js",

@@ -62,63 +62,201 @@ your own phone in about 20 minutes: [docs/try-it-on-your-phone.md](./docs/try-it
 
 ![Recap dashboard](./docs/images/dashboard-session.png)
 
-## Websites and web apps in the same dashboard (beta)
+## Add Recap to a live website
 
 The web script can send sessions to the same Supabase project and dashboard as your mobile apps, so web,
-iOS and Android sit side by side in one set of analytics. Leave `supabase` out and Recap keeps working the
-original way, with nothing leaving the browser.
+iOS and Android sit side by side in one set of analytics. It takes about 30 minutes, and the defaults are
+made for a public site: you don't need any code of your own around it. Leave `supabase` out and Recap
+keeps working the original way, with nothing leaving the browser.
+
+**1. Database.** Run every file in [`supabase/migrations/`](./supabase/migrations) in your Supabase project and
+add yourself as a dashboard admin ([AGENTS.md](./AGENTS.md), Step 1, has the details). Copy the project URL
+and the **anon or publishable** key. Never use the `service_role` or `sb_secret_…` key: Recap refuses it,
+logs an error and sends nothing.
+
+**2. Paste the script tag** into every page, and change the values:
+
+```html
+<script defer
+  src="https://cdn.jsdelivr.net/gh/Scylark/recap@v1.3.0/dist/recap.min.js"
+  integrity="REPLACE_WITH_SRI" crossorigin="anonymous"
+  data-app-id="my-site"
+  data-supabase-url="https://your-project.supabase.co"
+  data-supabase-key="sb_publishable_…"
+  data-hosts="example.com,*.example.com"
+  data-exclude-paths="/account,/admin"
+  data-recordings="true"
+  data-record-sample="0.2"></script>
+```
+
+With that tag Recap:
+
+- runs only on `example.com` and its subdomains, and does nothing on `localhost` or preview deploys;
+- does nothing on pages whose path starts `/account` or `/admin`;
+- shows visitors no researcher panel, shortcut or three-finger hold;
+- labels taps only from `aria-label`, `title`, `alt` and similar, never from on-screen text;
+- captures nothing when the browser sends [Global Privacy Control](https://globalprivacycontrol.org/);
+- does nothing inside an iframe, so a page embedded on another site isn't counted;
+- records one tab in five for replay, with every form field masked. Only those tabs load the recorder.
+
+**3. Mark what's private** with the one privacy marker:
+
+```html
+<section data-recap-private>Order history, messages, account details</section>
+<p>Signed in as <span data-recap-mask>Jo Bloggs</span></p>
+```
+
+| Marker | What it does |
+| --- | --- |
+| `data-recap-private` (or `class="recap-private"`) | Taps on it and everything inside it aren't counted, and it is left out of recordings. On `<html>` or `<body>` it also stops scroll depth for the page |
+| `data-recap-mask` (or `class="recap-mask"`) | Its text is never used to label a tap or a heading, and shows as `*` in recordings. Only your own `data-ut-label` can still label a tap inside it |
+
+Form fields are always masked. The older names `data-ut-no-track`, `ut-block` and `ut-mask` keep working.
+
+**4. Consent.** If your visitors must opt in first, add `data-require-consent="true"` and call `Recap.optIn()`
+from your cookie banner. Either way, give them a way out:
+
+```js
+Recap.optIn();   // remembered in this browser
+Recap.optOut();  // stops at once, deletes anything not yet sent and the copy kept in this browser; other open tabs follow it
+```
+
+**5. Check it.** Open your site with `?recap=on` and the browser console open. Recap logs why it is or isn't
+running, what it sends and the size of each recording. Then find the session in the dashboard.
+
+### Test switches
+
+Add one to any address. It is remembered for the tab until the tab closes.
+
+| Address | In this tab |
+| --- | --- |
+| `?recap=on` | Runs even where `hosts` says no (`localhost`, a preview deploy), logs to the console, and sends the session whatever the sample rate |
+| `?recap=record` | The same, and records the page for replay whatever `data-record-sample` says |
+| `?recap=off` | Nothing runs: keeps your own visits out of the numbers |
+| `?recap=auto` | Clears the switch |
+
+### `Recap.status()`
+
+```js
+Recap.status(); // { running: false, recording: false, reason: 'host-not-listed' }
+```
+
+`running` says whether Recap is capturing on this page, `recording` whether this tab's page is being
+recorded for replay, and `reason` why:
+
+| `reason` | Meaning |
+| --- | --- |
+| `running` | Capturing |
+| `not-started` | `Recap.init()` hasn't run yet |
+| `host-not-listed` | This hostname isn't in `hosts` |
+| `excluded-path` | This page matches `excludePaths` |
+| `gpc` | The browser sends Global Privacy Control |
+| `opted-out` | The visitor called `Recap.optOut()` |
+| `consent-needed` | `requireConsent` is on and `Recap.optIn()` hasn't been called |
+| `in-frame` | The page is inside an iframe |
+| `secret-key` | The Supabase key is a secret key |
+| `switched-off` | `?recap=off` was opened in this tab |
+
+With `debug` on (or `?recap=on`), the reason is also logged once in the console.
+
+### Options
+
+Each script-tag attribute has a matching `Recap.init()` option. "When sending" means sessions go to a
+dashboard (`supabase`, `remote` or `Recap.connect()`); without one, the old prototype defaults apply.
+
+| Script tag | `Recap.init()` | Default | What it does |
+| --- | --- | --- | --- |
+| `data-app-id` | `appId` | the hostname | Name for this site in the dashboard, e.g. `my-shop-web` |
+| `data-supabase-url`, `data-supabase-key` | `supabase: { url, anonKey }` | none | Your project URL and anon or publishable key |
+| `data-hosts` | `hosts` | everywhere | Hostnames to run on: `example.com` exactly, or `*.example.com` for its subdomains (list both for both). An empty list runs nowhere |
+| `data-exclude-paths` | `excludePaths` | none | Path prefixes where nothing runs (`/admin` also covers `/admin/users` and `/admin.html`). `Recap.init()` also takes RegExps |
+| `data-recordings="true"` | `recordings` | off | Record pages for replay (see [Recordings](#recordings)) |
+| `data-record-sample` | `recordings.sampleRate` | `1` | Share of tabs recorded, `0` to `1` |
+| `data-record-canvas` | `recordings.canvas` | off | Record `<canvas>` charts as pictures: `true` for 2 frames a second, or a number |
+| `data-recordings-src` | `recordings.src` | next to `recap.min.js` | Where to load `recap-rrweb.min.js` from |
+| `data-recordings-integrity` | `recordings.integrity` | none | Subresource integrity hash for that file |
+| `data-mask-text` | `recordings.maskText` | the mask marker | `"true"` replaces all text in replays with `*`, or a CSS selector for the parts to mask |
+| `data-require-consent="true"` | `requireConsent` | `false` | Record nothing until `Recap.optIn()` |
+| `data-panel="true"` | `panel` | off when sending, on otherwise | The researcher panel, its shortcut and touch-hold. `"false"` turns them off everywhere |
+| `data-labels` | `labels` | `'attributes'` when sending, `'text'` otherwise | Where tap labels come from (see [Element labelling](#element-labelling)) |
+| `data-respect-gpc="false"` | `respectGPC` | `true` when sending | Whether Global Privacy Control stops capture |
+| `data-allow-in-frames` | `allowInFrames` | `false` when sending | Run inside iframes |
+| `data-debug="true"` | `debug` | `false` | Log to the console. `?recap=on` does it for one tab |
+| `data-strip-query-params="false"` | `stripQueryParams` | `true` | Keep query strings in recorded addresses (the hash is always dropped) |
+| | `screenName(path)` | the path | The name to count a page under, e.g. `(path) => path.replace(/\.html$/, '')` to count `/plan` and `/plan.html` as one screen. Return nothing to keep the path |
+
+`screenName` (and RegExps in `excludePaths`) need code: add `data-auto-init="false"` to the tag and call
+`Recap.init({ screenName })` from your own script once the tag has run (see
+[In a Capacitor app](#in-a-capacitor-app) for the pattern). The tag's other settings still apply.
+
+### Recordings
+
+Page recordings use [rrweb](https://github.com/rrweb-io/rrweb) 2.2.2, the version the dashboard plays them
+back with. They capture the page's structure and changes rather than pictures, so replays are sharp and
+smooth, scrolling and open menus included. Every form field is masked, `data-recap-private` parts are left
+out, and the page address keeps only its origin and path.
+
+With the script tag, `data-recordings="true"` is all it takes: a tab that is sampled in loads
+`recap-rrweb.min.js` (rrweb's recorder, about 23 kB gzipped) from the same folder as `recap.min.js`, and
+other tabs never load it. If you host `recap.min.js` yourself, put `recap-rrweb.min.js` from `dist/` next
+to it. If the recorder can't load (a Content-Security-Policy that doesn't allow the folder, for example),
+Recap carries on without replays and says why in debug mode.
+
+In debug mode Recap logs the size of each full page snapshot and warns above 2 MB: above 2.5 MB recordings
+stop for that session, so mark large parts `data-recap-private`. Recordings need
+`supabase/migrations/*_recap_dom.sql`. Try them with the test shop in
+[`examples/web-test-shop/`](./examples/web-test-shop).
+
+### With a bundler
+
+`npm install recap-ux` (which installs rrweb 2.2.2 with it). Importing the module starts nothing until you
+call `Recap.init()`:
 
 ```js
 import Recap from 'recap-ux';
-import { record } from 'rrweb'; // optional: page recordings for replay
+import { record } from 'rrweb'; // or recordings: { src: '/recap-rrweb.min.js' }, copied from recap-ux/dist, to load it only in sampled tabs
 
 Recap.init({
   appId: 'my-site',
   supabase: { url: 'https://your-project.supabase.co', anonKey: 'sb_publishable_…' },
-  recordings: { record }, // leave out for analytics and heatmaps only
+  hosts: ['example.com', '*.example.com'],
+  excludePaths: ['/account', /^\/orders\/\d+/],
+  recordings: { record, sampleRate: 0.2 },
+  screenName: (path) => path.replace(/\.html$/, ''),
 });
 Recap.track('signed_up', { plan: 'pro' }); // custom events for funnels
 ```
 
-Or with a script tag: `<script src="…/recap.min.js" data-app-id="my-site" data-supabase-url="…" data-supabase-key="…"></script>`
-(add `data-recordings="true"` and load rrweb's script first for replays).
+Without `record` or `src`, a module build can't find the recorder, and debug mode says so.
 
-Importing `recap-ux` as a module starts nothing until you call `Recap.init()`. The script tag (`recap.min.js`)
-starts itself from its `data-*` attributes.
+### In a Capacitor app
 
-Page recordings use [rrweb](https://github.com/rrweb-io/rrweb): they capture the page's structure and changes rather than
-pictures, so replays are sharp and smooth, scrolling and open menus included. Every form field is masked, and anything
-marked `class="recap-private"` or `data-ut-no-track` is left out. They need `supabase/migrations/*_recap_dom.sql`.
-Try it with the test shop in [`examples/web-test-shop/`](./examples/web-test-shop).
+Inside a Capacitor app the page's hostname is `localhost` by default, so `hosts` leaves the app out, like
+your own development server. To count the app as well, add `data-auto-init="false"` to the tag and decide
+in your own script:
 
-**On a live site**, these settings keep visitors' details out and Recap's own tools hidden:
-
-```js
-Recap.init({
-  appId: 'my-site',
-  supabase: { url, anonKey },
-  panel: false,                 // no researcher panel, shortcut or three-finger hold for visitors
-  labels: 'attributes',         // tap labels from aria-label, title, alt only, never on-screen text (the default once sending)
-  screenName: (path) => path.replace(/\.html$/, ''), // count /plan and /plan.html as one screen
-  requireConsent: true,         // record nothing until Recap.optIn()
-  recordings: { record, maskText: true }, // replays show the layout with every word replaced by *
-});
-
-// From your cookie banner or settings page:
-Recap.optIn();   // remembered in this browser
-Recap.optOut();  // stops at once, deletes anything not yet sent and the copy kept in this browser; remembered, and other open tabs follow it
+```html
+<script>
+  // After the deferred Recap tag has run.
+  document.addEventListener('DOMContentLoaded', () => {
+    const inApp = window.Capacitor?.isNativePlatform?.() === true;
+    Recap.init({ hosts: inApp ? ['localhost'] : ['example.com', '*.example.com'] });
+  });
+</script>
 ```
 
-| Setting | What it does |
-| --- | --- |
-| `panel: false` | Turns off the researcher panel, its keyboard shortcut and the touch-hold. `shortcut: false` turns off only the shortcut. A later `init()` can change it |
-| `labels` | Where tap labels come from: `'text'` also uses the tapped element's visible text, `'attributes'` only `aria-label`, `aria-labelledby`, `title`, `alt` and `placeholder`, `'none'` only your own `data-ut-label`. Default: `'text'` while data stays in the browser, `'attributes'` once sessions go to a dashboard |
-| `screenName(path)` | Returns the name to count a page under. Used for page views, taps, scrolls and dashboard screens. Return nothing to keep the path |
-| `requireConsent` | Nothing is recorded or sent until `Recap.optIn()`. `Recap.optOut()` works either way, and both choices are kept in `localStorage` (`recap-consent`), so other open tabs of the site follow them at once. `Recap.isRecording()` says where things stand |
-| `recordings.maskText` | `true` replaces all text in replays with `*`, or pass a CSS selector for the parts to mask. `.ut-mask` text is always masked |
+The same pattern passes `screenName` or RegExp `excludePaths`.
 
-Set `screenName` in your first `init()` call. With the script tag, add `data-auto-init="false"` and call
-`Recap.init({ screenName })` yourself: the tag's other `data-*` settings still apply.
+### Upgrading from 1.2
+
+- **Breaking:** once sessions go to a dashboard, the researcher panel, its shortcut and its touch-hold are
+  off unless you set `panel: true` (`data-panel="true"`). `panel: false` still turns them off everywhere.
+- Also once sending, Global Privacy Control stops capture (`respectGPC: false` to change that), nothing
+  runs inside an iframe (`allowInFrames: true`), and a secret Supabase key is refused.
+- Recordings load rrweb on their own: you can drop the rrweb `<script>` you added before Recap's.
+- With the script tag, `window.Recap` is now the API itself, so `Recap.init()`, `Recap.optIn()` and
+  `Recap.status()` work as written here. `Recap.Recap` and `Recap.default` still work too.
+- Recorded page addresses no longer include the query string (unless `stripQueryParams: false`) or the hash.
 
 ## Quick start
 
@@ -152,24 +290,26 @@ A ready-to-run moderated validation script lives at [`examples/in-person-usabili
 
 ## Configuration
 
-All options are `data-*` attributes on the script tag:
+All options are `data-*` attributes on the script tag. The settings for sending to a dashboard, and the
+live-site gate, are under [Add Recap to a live website](#options).
 
 | Attribute | Default | Description |
 |-----------|---------|-------------|
 | `data-session-name` | auto | Label for this session, e.g. `"participant-04"` |
 | `data-show-panel` | `"false"` | Show researcher panel on load |
-| `data-panel` | `"true"` | `"false"` turns off the researcher panel, its shortcut and the touch-hold. Use it on live sites |
+| `data-panel` | `"true"`, or `"false"` with Supabase | The researcher panel, its shortcut and the touch-hold. `"false"` turns them off; `"true"` keeps them on when sessions also go to a dashboard |
 | `data-shortcut` | `"alt+shift+y"` | Keyboard shortcut for the researcher panel. Format: modifiers and one key joined by `+`, e.g. `"ctrl+shift+y"`. `"false"` for none |
 | `data-labels` | `"text"`, or `"attributes"` with Supabase | Where tap labels come from: `"text"`, `"attributes"` or `"none"` (see [Element labelling](#element-labelling)) |
 | `data-require-consent` | `"false"` | Record nothing until the page calls `Recap.optIn()` |
 | `data-auto-init` | `"true"` | `"false"` waits for the page to call `Recap.init()`, with the tag's settings underneath |
-| `data-recap` | none | Marks this tag as Recap's, if you renamed the file |
-| `data-supabase-url` | none | Your Supabase project URL. With `data-supabase-key`, sessions also go to the Recap dashboard (see [Web sessions in the dashboard](#web-sessions-in-the-dashboard)) |
-| `data-supabase-key` | none | Your Supabase **public anon or publishable key**. Never the service role key |
+| `data-recap` | none | Marks this tag as Recap's, if you renamed the file. It marks nothing on the page: the privacy markers are `data-recap-private` and `data-recap-mask` |
+| `data-supabase-url` | none | Your Supabase project URL. With `data-supabase-key`, sessions also go to the Recap dashboard (see [Add Recap to a live website](#add-recap-to-a-live-website)) |
+| `data-supabase-key` | none | Your Supabase **public anon or publishable key**. A `service_role` or `sb_secret_` key is refused |
 | `data-app-id` | page hostname | Name for this site in the dashboard, e.g. `my-shop-web` |
 | `data-app-version` | none | Your site's version, shown in the dashboard |
-| `data-recordings` | `"false"` | With Supabase set: record pages for replay in the dashboard. Load rrweb's script before Recap's |
+| `data-recordings` | `"false"` | With Supabase set: record pages for replay in the dashboard. Tabs sampled in load `recap-rrweb.min.js` from next to `recap.min.js` |
 | `data-mask-text` | none | With recordings: `"true"` replaces all text in replays with `*`, or a CSS selector for the parts to mask |
+| `data-hosts`, `data-exclude-paths`, `data-respect-gpc`, `data-allow-in-frames`, `data-record-sample`, `data-record-canvas`, `data-recordings-src`, `data-recordings-integrity`, `data-debug` | | See [Options](#options) |
 | `data-endpoint` | none | URL to POST captured events to in batches (see [Advanced](#advanced)) |
 | `data-strip-query-params` | `"true"` | Remove query strings from recorded URLs. Set to `"false"` to keep them |
 | `data-touch-trigger` | `"true"` | Hold 3 fingers on screen to open/close the panel on touch devices |
@@ -202,18 +342,18 @@ add explicit labels:
 <div data-ut-label="Filter panel">...</div>
 ```
 
-To keep sensitive things out:
+To keep sensitive things out, use the privacy marker and the mask marker:
 
 ```html
-<input type="password" data-ut-no-track />
-<section class="recap-private">No taps counted, and left out of recordings</section>
-<div class="ut-block">Same as recap-private</div>
-<span class="ut-mask">Never used in labels, and masked in recordings</span>
+<section data-recap-private>No taps counted, and left out of recordings</section>
+<span data-recap-mask>Never used in labels, and masked in recordings</span>
 ```
 
-`data-ut-no-track`, `recap-private` and `ut-block` cover everything inside them; on `<body>` they also stop
-scroll depth. Inside `ut-mask`, only `data-ut-label` can label a tap: never `aria-label`, `title`, `alt`,
-`aria-labelledby`, `placeholder` or text.
+`data-recap-private` (or `class="recap-private"`) covers everything inside it; on `<html>` or `<body>` it also
+stops scroll depth. Inside `data-recap-mask` (or `class="recap-mask"`), only `data-ut-label` can label a tap:
+never `aria-label`, `title`, `alt`, `aria-labelledby`, `placeholder` or text. The older names keep working:
+`data-ut-no-track` and `ut-block` mean the same as `data-recap-private`, and `ut-mask` the same as
+`data-recap-mask`.
 
 ## Advanced
 
@@ -223,16 +363,7 @@ Set `data-endpoint` on the script tag to a URL you control. Recap then posts cap
 
 ### Web sessions in the dashboard
 
-If you use the Recap dashboard for a mobile app (see [Mobile apps](#mobile-apps-beta)), the web library can send to the same Supabase project. Run the same migrations, then:
-
-```html
-<script src="https://unpkg.com/recap-ux/dist/recap.min.js"
-  data-supabase-url="https://your-project.supabase.co"
-  data-supabase-key="your-public-anon-key"
-  data-app-id="my-shop-web"></script>
-```
-
-Pages, clicks, scroll depth and tab switches appear in the dashboard with platform `web`. Typed text is never captured. The panel and local storage keep working as before, so nothing changes for people who don't use Supabase. For page replays and custom events, see [Websites and web apps in the same dashboard](#websites-and-web-apps-in-the-same-dashboard-beta).
+If you use the Recap dashboard for a mobile app (see [Mobile apps](#mobile-apps-beta)), the web library can send to the same Supabase project: see [Add Recap to a live website](#add-recap-to-a-live-website). Pages, clicks, scroll depth and tab switches appear in the dashboard with platform `web`. Typed text is never captured. Without Supabase settings nothing changes: the panel and local storage work as they always have.
 
 ## Development
 

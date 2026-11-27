@@ -63,12 +63,22 @@ function sanitizeUrl(rawUrl, stripQuery = true) {
     return rawUrl.split("?")[0]?.split("#")[0] ?? rawUrl;
   }
 }
-const EXCLUDE_SELECTOR = "[data-ut-no-track], .ut-block, .recap-private";
+function sanitizeHref(rawUrl, stripQuery = true) {
+  try {
+    const base = typeof location !== "undefined" ? location.href : "https://localhost";
+    const url = new URL(rawUrl, base);
+    return url.origin + sanitizeUrl(url.href, stripQuery);
+  } catch {
+    return sanitizeUrl(rawUrl, true);
+  }
+}
+const EXCLUDE_SELECTOR = "[data-recap-private], .recap-private, [data-ut-no-track], .ut-block";
+const MASK_SELECTOR = "[data-recap-mask], .recap-mask, .ut-mask";
 function isExcluded(el) {
   return el.closest(EXCLUDE_SELECTOR) !== null;
 }
 function isMasked(el) {
-  return el.closest(".ut-mask") !== null;
+  return el.closest(MASK_SELECTOR) !== null;
 }
 let _labelMode = "text";
 function setLabelMode(mode) {
@@ -2686,7 +2696,7 @@ async function openPanel() {
   _panelRoot = document.createElement("div");
   _panelRoot.className = `${PREFIX}-root`;
   _panelRoot.setAttribute("data-recap-panel", "true");
-  _panelRoot.setAttribute("data-ut-no-track", "");
+  _panelRoot.setAttribute("data-recap-private", "");
   render(_panelRoot, _sessions);
   document.body.appendChild(_panelRoot);
   _origPushState = history.pushState.bind(history);
@@ -3084,11 +3094,144 @@ function initTouchTrigger(onTrigger, options = {}) {
     document.removeEventListener("touchcancel", onTouchEndOrCancel);
   };
 }
-const REMOTE_SDK_VERSION = "web-0.2.0";
+const KEY_SWITCH = "recap-switch";
+function isSwitch(v) {
+  return v === "on" || v === "record" || v === "off";
+}
+function readTabSwitch(search) {
+  let asked = null;
+  try {
+    asked = new URLSearchParams(search).get("recap");
+  } catch {
+    asked = null;
+  }
+  const v = asked?.trim().toLowerCase();
+  if (isSwitch(v)) {
+    try {
+      sessionStorage.setItem(KEY_SWITCH, v);
+    } catch {
+    }
+    return v;
+  }
+  if (v === "auto") {
+    try {
+      sessionStorage.removeItem(KEY_SWITCH);
+    } catch {
+    }
+    return null;
+  }
+  try {
+    const saved = sessionStorage.getItem(KEY_SWITCH);
+    return isSwitch(saved) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+function hostOf(entry) {
+  let h = entry.trim().toLowerCase();
+  if (h.includes("://")) {
+    try {
+      h = new URL(h).hostname;
+    } catch {
+    }
+  }
+  return h.replace(/\/.*$/, "").replace(/:\d+$/, "").replace(/\.$/, "");
+}
+function hostAllowed(hostname, hosts) {
+  const host = hostname.toLowerCase().replace(/\.$/, "");
+  return hosts.some((entry) => {
+    if (typeof entry !== "string") return false;
+    const h = hostOf(entry);
+    if (!h) return false;
+    if (h.startsWith("*.")) return host.endsWith(h.slice(1)) && host.length > h.length - 1;
+    return host === h;
+  });
+}
+function pathExcluded(path, excludes) {
+  if (!excludes || excludes.length === 0) return false;
+  return excludes.some((x) => {
+    if (x instanceof RegExp) {
+      x.lastIndex = 0;
+      return x.test(path);
+    }
+    if (typeof x !== "string") return false;
+    const prefix = x.trim();
+    if (!prefix) return false;
+    return path.startsWith(prefix.startsWith("/") ? prefix : `/${prefix}`);
+  });
+}
+function inFrame() {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+function gpcOn() {
+  try {
+    return typeof navigator !== "undefined" && navigator.globalPrivacyControl === true;
+  } catch {
+    return false;
+  }
+}
+function secretKeyKind(key) {
+  if (typeof key !== "string") return null;
+  const k = key.trim();
+  if (k.startsWith("sb_secret_")) return "sb_secret";
+  const parts = k.split(".");
+  if (parts.length !== 3 || !parts[1]) return null;
+  try {
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(b64 + "=".repeat((4 - b64.length % 4) % 4)));
+    return payload && payload.role === "service_role" ? "service_role" : null;
+  } catch {
+    return null;
+  }
+}
+function secretKeyMessage(kind) {
+  const name = kind === "service_role" ? "the service_role key" : "a secret key (sb_secret_…)";
+  return `[Recap] Not starting: the Supabase key given is ${name}. It gives full access to your database and must never be in a web page, so Recap sends nothing. Use the anon or publishable key (Supabase: Project Settings, API keys), and rotate this secret key now: anyone who loaded the page can read it.`;
+}
+const REMOTE_SDK_VERSION = "web-0.3.0";
 function maskTextSelectorFor(maskText) {
   if (maskText === true) return "*";
   const extra = typeof maskText === "string" ? maskText.trim() : "";
-  return extra ? `.ut-mask, ${extra}` : ".ut-mask";
+  return extra ? `${MASK_SELECTOR}, ${extra}` : MASK_SELECTOR;
+}
+function canvasFps(canvas) {
+  if (canvas === true) return 2;
+  return typeof canvas === "number" && Number.isFinite(canvas) && canvas > 0 ? canvas : 0;
+}
+let _defaultRrwebSrc = null;
+const _loads = /* @__PURE__ */ new Map();
+function loadScript(src, integrity) {
+  const known = _loads.get(src);
+  if (known) return known;
+  const p = new Promise((resolve, reject) => {
+    try {
+      const s = document.createElement("script");
+      s.src = src;
+      s.async = true;
+      if (integrity) {
+        s.integrity = integrity;
+        s.crossOrigin = "anonymous";
+      }
+      s.onload = () => resolve();
+      s.onerror = () => {
+        s.remove();
+        reject(new Error(`could not load ${src}`));
+      };
+      (document.head ?? document.documentElement).appendChild(s);
+    } catch (err) {
+      reject(err);
+    }
+  });
+  _loads.set(src, p);
+  p.catch(() => _loads.delete(src));
+  return p;
+}
+function pageRecord() {
+  return globalThis.rrweb?.record;
 }
 const KEY_START = "recap-remote-start";
 const KEY_UPLOADED = "recap-remote-uploaded";
@@ -3100,6 +3243,7 @@ const KEEPALIVE_LIMIT = 6e4;
 const DOM_CHUNK_BYTES = 4e5;
 const DOM_CHUNK_EVENTS = 2e3;
 const DOM_EVENT_MAX_BYTES = 25e5;
+const DOM_SNAPSHOT_WARN_BYTES = 2e6;
 const DOM_BUFFER_MAX_BYTES = 5e6;
 function utf8Bytes(s) {
   let n = 0;
@@ -3141,7 +3285,7 @@ function browserInfo() {
   return { model, os };
 }
 class RemoteSink {
-  constructor(config, fetchFn = (...a) => fetch(...a)) {
+  constructor(config, fetchFn = (...a) => fetch(...a), opts = {}) {
     this.queue = [];
     this.screen = null;
     this.scrollMax = /* @__PURE__ */ new Map();
@@ -3154,22 +3298,31 @@ class RemoteSink {
     this.domSending = false;
     this.stopRecording = null;
     this.recordFn = null;
+    this.active = false;
+    this.recordingBlocked = false;
     if (!config.appId) throw new Error("Recap: remote.appId is required");
     if (!config.supabase && !config.endpoint) throw new Error("Recap: remote needs supabase or endpoint");
     this.config = config;
     this.fetchFn = fetchFn;
+    this.opts = opts;
     this.sessionId = getSessionId();
     const savedStart = Number(store("session", KEY_START));
     this.startMs = savedStart > 0 ? savedStart : Date.now();
     if (!(savedStart > 0)) store("session", KEY_START, String(this.startMs));
     this.uploaded = store("session", KEY_UPLOADED) === this.sessionId;
     const savedSample = store("session", KEY_SAMPLED);
-    this.sampled = savedSample !== null ? savedSample === "1" : Math.random() < (config.sampleRate ?? 1);
+    this.sampled = opts.sampleIn === true || (savedSample !== null ? savedSample === "1" : Math.random() < (config.sampleRate ?? 1));
     store("session", KEY_SAMPLED, this.sampled ? "1" : "0");
   }
-  /** Start sending. Returns false if this session wasn't sampled. */
+  /** Start sending. Returns false if this session wasn't sampled, or the key is a secret one. */
   start() {
+    const secret = secretKeyKind(this.config.supabase?.anonKey);
+    if (secret) {
+      console.error(secretKeyMessage(secret));
+      return false;
+    }
     if (!this.sampled) return false;
+    this.active = true;
     this.timer = setInterval(() => void this.flush(), this.config.flushIntervalMs ?? 5e3);
     const onVis = () => {
       const hidden = document.visibilityState === "hidden";
@@ -3188,6 +3341,7 @@ class RemoteSink {
     return true;
   }
   stop() {
+    this.active = false;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.stopRecording?.();
@@ -3202,6 +3356,7 @@ class RemoteSink {
    * earlier visits.
    */
   discard() {
+    this.active = false;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.stopFns.forEach((f) => f());
@@ -3215,6 +3370,23 @@ class RemoteSink {
   }
   getSessionId() {
     return this.sessionId;
+  }
+  /** Whether this tab's page is being recorded now. */
+  isRecordingPage() {
+    return this.recordFn !== null && !this.recordingBlocked;
+  }
+  /**
+   * Stop recording the page for the rest of this page load, and don't start (or finish loading) a
+   * recorder. What was recorded before is still sent. Used when a single-page app goes to a path
+   * in excludePaths: the private page can stay on screen for a moment after the address changes,
+   * so a fresh snapshot taken when it leaves could still show it.
+   */
+  blockRecording(reason) {
+    if (this.recordingBlocked) return;
+    this.recordingBlocked = true;
+    if (this.recordFn) this.log(reason);
+    this.stopRecording?.();
+    this.stopRecording = null;
   }
   /** Feed one event from the web tracker's capture layers. */
   handle(event) {
@@ -3388,39 +3560,78 @@ class RemoteSink {
   }
   // ---------------------------------------------------------------- recordings
   startRecording() {
-    const opt = this.config.recordings;
-    if (!opt) return;
-    const o = opt === true ? {} : opt;
-    const key = "recap-remote-rec";
-    const saved = store("session", key);
-    const on = saved !== null ? saved === "1" : Math.random() < (o.sampleRate ?? 1);
-    store("session", key, on ? "1" : "0");
-    if (!on) return;
-    const record = o.record ?? globalThis.rrweb?.record;
-    if (!record) {
-      this.log("recordings are on but rrweb was not found: pass recordings.record, or load rrweb first");
+    try {
+      const opt = this.config.recordings;
+      if (!opt || this.recordingBlocked) return;
+      const o = opt === true ? {} : opt;
+      const key = "recap-remote-rec";
+      const saved = store("session", key);
+      const on = this.opts.recordIn === true || (saved !== null ? saved === "1" : Math.random() < (o.sampleRate ?? 1));
+      store("session", key, on ? "1" : "0");
+      if (!on) {
+        this.log("recordings: this tab is not in the recorded share (recordings.sampleRate)");
+        return;
+      }
+      const record = o.record ?? pageRecord();
+      if (record) {
+        this.beginRecording(record, o);
+        return;
+      }
+      const src = o.src ?? _defaultRrwebSrc;
+      if (!src) {
+        this.log(
+          "recordings are on but rrweb isn't loaded: pass recordings.record (import { record } from 'rrweb'), or recordings.src with the address of recap-rrweb.min.js"
+        );
+        return;
+      }
+      this.log(`loading the recorder from ${src}`);
+      loadScript(src, o.integrity).then(
+        () => {
+          if (!this.active || this.recordingBlocked || this.recordFn) return;
+          const loaded = pageRecord();
+          if (loaded) this.beginRecording(loaded, o);
+          else this.log(`recordings are off for this page: ${src} loaded but did not set window.rrweb.record`);
+        },
+        (err) => this.log(
+          `recordings are off for this page: could not load ${src} (blocked by a Content-Security-Policy, offline, or the wrong address)`,
+          err
+        )
+      );
+    } catch (err) {
+      this.log("recordings are off for this page: could not start the recorder", err);
+    }
+  }
+  beginRecording(record, o) {
+    const block = [EXCLUDE_SELECTOR, o.blockSelector].filter(Boolean).join(", ");
+    const fps = canvasFps(o.canvas);
+    this.recordFn = record;
+    let stop;
+    try {
+      stop = record({
+        emit: (e) => this.pushDom(e),
+        maskAllInputs: true,
+        blockSelector: block,
+        // Text is replaced with * (same length, so the layout stays): the mask marker always, plus maskText.
+        maskTextSelector: maskTextSelectorFor(o.maskText),
+        inlineStylesheet: true,
+        recordCanvas: fps > 0,
+        collectFonts: false,
+        sampling: { mousemove: 50, scroll: 100, input: "last", media: 800, ...fps > 0 ? { canvas: fps } : {} },
+        // Canvas frames as compressed pictures (a browser that can't make WebP sends PNG).
+        ...fps > 0 ? { dataURLOptions: { type: "image/webp", quality: 0.6 } } : {},
+        slimDOMOptions: { script: true, comment: true, headFavicon: true, headWhitespace: true, headMetaSocial: true }
+      });
+    } catch (err) {
+      this.recordFn = null;
+      this.log("recordings are off for this page: rrweb could not start", err);
       return;
     }
-    const block = ["[data-ut-no-track]", ".ut-block", ".recap-private", o.blockSelector].filter(Boolean).join(", ");
-    this.recordFn = record;
-    const stop = record({
-      emit: (e) => this.pushDom(e),
-      maskAllInputs: true,
-      blockSelector: block,
-      // Text is replaced with * (same length, so the layout stays): .ut-mask always, plus maskText.
-      maskTextSelector: maskTextSelectorFor(o.maskText),
-      inlineStylesheet: true,
-      recordCanvas: false,
-      collectFonts: false,
-      sampling: { mousemove: 50, scroll: 100, input: "last", media: 800 },
-      slimDOMOptions: { script: true, comment: true, headFavicon: true, headWhitespace: true, headMetaSocial: true }
-    });
     if (!this.recordFn) {
       stop?.();
       return;
     }
     this.stopRecording = stop ?? null;
-    this.log("recording the page for replay");
+    this.log(fps > 0 ? `recording the page for replay, canvas at ${fps} frames a second` : "recording the page for replay");
   }
   /** Stop recording this session and drop what's buffered. */
   endRecording(reason) {
@@ -3431,9 +3642,18 @@ class RemoteSink {
     this.domBuffer = [];
     this.domBytes = 0;
   }
-  pushDom(e) {
-    if (!this.recordFn) return;
+  pushDom(event) {
+    if (!this.recordFn || this.recordingBlocked) return;
+    const e = this.cleanDom(event);
     const n = utf8Bytes(JSON.stringify(e));
+    if (e.type === 2) {
+      this.log(`full snapshot: ${Math.round(n / 1e3)} KB`);
+      if (this.config.debug && n > DOM_SNAPSHOT_WARN_BYTES && n <= DOM_EVENT_MAX_BYTES) {
+        console.warn(
+          `[Recap] full snapshot is ${(n / 1e6).toFixed(1)} MB, close to the ${DOM_EVENT_MAX_BYTES / 1e6} MB limit: above it, recordings stop for the session. Mark large parts data-recap-private, or trim inline images and styles.`
+        );
+      }
+    }
     if (n > DOM_EVENT_MAX_BYTES) {
       this.endRecording(`recordings are off for this session: the page is too large to record (${Math.round(n / 1e6)} MB)`);
       return;
@@ -3452,6 +3672,18 @@ class RemoteSink {
       return;
     }
     if (this.domBytes >= DOM_CHUNK_BYTES && this.uploaded) void this.sendDom();
+  }
+  /**
+   * An rrweb event as it may be stored. Meta events carry the page address: keep its origin and
+   * path (the Replayer needs an absolute address to load relative images and stylesheets) and drop
+   * the hash and, unless stripQueryParams is false, the query string, which can hold ids and
+   * tokens. Same rules as the addresses of page views, but without the screenName hook.
+   */
+  cleanDom(e) {
+    if (e.type !== 4) return e;
+    const data = e["data"];
+    if (!data || typeof data["href"] !== "string") return e;
+    return { ...e, data: { ...data, href: sanitizeHref(data["href"], this.config.stripQueryParams !== false) } };
   }
   /** The oldest buffered events, up to maxBytes. Always at least one, so a big snapshot goes alone. */
   takeDomChunk(maxBytes) {
@@ -3511,14 +3743,21 @@ class RemoteSink {
 }
 const KEY_CONSENT = "recap-consent";
 let _initialized = false;
+let _capturing = false;
 let _destroyFns = [];
 let _panelStops = [];
 let _config = {};
 let _scriptDefaults = {};
 let _remote = null;
 let _remoteConfig = null;
+let _unsampled = false;
 let _early = [];
 let _consent = null;
+let _switch;
+let _keyChecked;
+let _secretKey = null;
+let _sawExcludedPath = false;
+let _loggedReason = null;
 function consent() {
   if (_consent === null) {
     try {
@@ -3537,14 +3776,103 @@ function saveConsent(value) {
   } catch {
   }
 }
-function allowed() {
+function tabSwitch() {
+  if (_switch === void 0) _switch = typeof location !== "undefined" ? readTabSwitch(location.search) : null;
+  return _switch;
+}
+function connected() {
+  return _remoteConfig !== null || _remote !== null;
+}
+function debugOn() {
+  const sw = tabSwitch();
+  return _config.debug === true || sw === "on" || sw === "record";
+}
+function secretKey() {
+  const key = _remoteConfig?.supabase?.anonKey ?? _config.supabase?.anonKey;
+  if (key !== _keyChecked) {
+    _keyChecked = key;
+    _secretKey = secretKeyKind(key) ?? secretKeyKind(_config.supabase?.anonKey);
+    if (_secretKey) console.error(secretKeyMessage(_secretKey));
+  }
+  return _secretKey;
+}
+function pageBlock() {
+  const sw = tabSwitch();
+  if (sw === "off") return "switched-off";
+  const live = connected();
+  if (!(_config.allowInFrames ?? !live) && inFrame()) return "in-frame";
+  if (secretKey()) return "secret-key";
+  const hosts = _config.hosts;
+  const hostname = typeof location !== "undefined" ? location.hostname : "";
+  if (hosts && sw !== "on" && sw !== "record" && !hostAllowed(hostname, hosts)) return "host-not-listed";
+  if ((_config.respectGPC ?? live) && gpcOn()) return "gpc";
+  return null;
+}
+function blockReason() {
+  const page = pageBlock();
+  if (page) return page;
+  if (typeof location !== "undefined" && pathExcluded(location.pathname, _config.excludePaths)) return "excluded-path";
   const c = consent();
-  if (c === "denied") return false;
-  if (_config.requireConsent && c !== "granted") return false;
-  return true;
+  if (c === "denied") return "opted-out";
+  if (_config.requireConsent && c !== "granted") return "consent-needed";
+  return null;
+}
+function allowed() {
+  return blockReason() === null;
+}
+function currentStatus() {
+  if (!_initialized) return { running: false, recording: false, reason: "not-started" };
+  const reason = blockReason() ?? (_capturing ? "running" : "not-started");
+  const running = reason === "running";
+  return { running, recording: running && (_remote?.isRecordingPage() ?? false), reason };
+}
+function explain(reason) {
+  switch (reason) {
+    case "switched-off":
+      return "?recap=off is set for this tab; open the page with ?recap=auto to clear it";
+    case "in-frame":
+      return "the page is inside an iframe; set allowInFrames: true to run there";
+    case "secret-key":
+      return "the Supabase key is a secret key; use the anon or publishable key";
+    case "host-not-listed":
+      return `${location.hostname} is not in hosts; add ?recap=on to the address to test here`;
+    case "excluded-path":
+      return `${location.pathname} matches excludePaths`;
+    case "gpc":
+      return "this browser sends Global Privacy Control (respectGPC)";
+    case "opted-out":
+      return "Recap.optOut() was called in this browser; Recap.optIn() undoes it";
+    case "consent-needed":
+      return "requireConsent is on and Recap.optIn() has not been called";
+    default:
+      return reason;
+  }
+}
+function reportStatus() {
+  if (!_initialized || !debugOn()) return;
+  const { reason } = currentStatus();
+  if (reason === _loggedReason) return;
+  _loggedReason = reason;
+  if (reason === "running") {
+    console.log(`[Recap] running: ${connected() ? "sending sessions to the dashboard" : "keeping data in this browser"}`);
+  } else {
+    console.log(`[Recap] not running: ${reason} (${explain(reason)})`);
+  }
+}
+function onExcludedPath() {
+  if (_sawExcludedPath) return;
+  _sawExcludedPath = true;
+  _remote?.blockRecording("recordings are off for the rest of this page: it went to a page in excludePaths");
 }
 function capture(e) {
-  if (!allowed()) return;
+  const reason = blockReason();
+  if (reason) {
+    if (reason === "excluded-path") onExcludedPath();
+    reportStatus();
+    return;
+  }
+  if (!_remote) connectIfAllowed();
+  reportStatus();
   push(e);
   if (_remote) _remote.handle(e);
   else if (_early.length < 200) _early.push(e);
@@ -3555,13 +3883,29 @@ function given(config) {
   return out;
 }
 function refreshLabels() {
-  setLabelMode(_config.labels ?? (_remoteConfig || _remote ? "attributes" : "text"));
+  setLabelMode(_config.labels ?? (connected() ? "attributes" : "text"));
+}
+function sinkConfig(rc) {
+  return {
+    ...rc,
+    ...debugOn() ? { debug: true } : {},
+    ...rc.stripQueryParams === void 0 && _config.stripQueryParams === false ? { stripQueryParams: false } : {}
+  };
 }
 function connectIfAllowed() {
-  if (_remote || !_remoteConfig || !_initialized || !allowed()) return;
+  if (_remote || _unsampled || !_remoteConfig || !_capturing || !allowed()) return;
   try {
-    const sink = new RemoteSink(_remoteConfig);
-    if (!sink.start()) return;
+    const sw = tabSwitch();
+    const sink = new RemoteSink(sinkConfig(_remoteConfig), void 0, {
+      sampleIn: sw === "on" || sw === "record",
+      recordIn: sw === "record"
+    });
+    if (_sawExcludedPath) sink.blockRecording("recordings are off for this page: it was on a page in excludePaths");
+    if (!sink.start()) {
+      _unsampled = true;
+      _early = [];
+      return;
+    }
     _remote = sink;
     for (const e of _early) sink.handle(e);
     _early = [];
@@ -3572,7 +3916,8 @@ function connectIfAllowed() {
 const Recap = {
   /**
    * Start Recap, or change its settings. The first call starts capturing; later calls change only
-   * the settings they pass (panel, labels, screen names, consent, dashboard connection).
+   * the settings they pass (panel, labels, screen names, consent, dashboard connection). On a page
+   * the gate stops (see status()), nothing starts.
    */
   init(config = {}) {
     _config = { ..._scriptDefaults, ..._config, ...given(config) };
@@ -3581,32 +3926,39 @@ const Recap = {
     if (!_remoteConfig) _remoteConfig = remoteFrom(_config);
     setScreenNamer(_config.screenName);
     refreshLabels();
-    const first = !_initialized;
-    if (first) {
-      _initialized = true;
+    _initialized = true;
+    const starting = !_capturing && pageBlock() === null;
+    if (starting) {
+      _capturing = true;
       startCapture(_config);
     }
-    applyPanel(first ? _config.showPanel === true : config.showPanel === true);
+    applyPanel(starting ? _config.showPanel === true : config.showPanel === true);
     connectIfAllowed();
+    reportStatus();
   },
   /**
    * Send this session to your Recap dashboard as well (Supabase or an endpoint). Call init() first.
    * Safe to call more than once; only the first settings are used. With `requireConsent`, the
-   * connection starts once the visitor opts in.
+   * connection starts once the visitor opts in. The live-site defaults apply from here on: the
+   * panel is off unless `panel: true`, labels come from attributes, GPC is respected and nothing
+   * runs inside an iframe.
    */
   connect(config) {
     if (!_remoteConfig) _remoteConfig = config;
     refreshLabels();
+    if (_initialized) applyPanel(false);
     connectIfAllowed();
+    reportStatus();
   },
   /**
    * The visitor agreed to analytics: start recording (and sending, if connected). Remembered in
    * this browser. Needed only with `requireConsent`, or after optOut().
    */
   optIn() {
-    const was = _initialized && allowed();
+    const was = _capturing && allowed();
     saveConsent("granted");
     resumeAfterOptIn(was);
+    reportStatus();
   },
   /**
    * The visitor said no: stop recording and sending, and delete everything not yet sent.
@@ -3615,10 +3967,20 @@ const Recap = {
   optOut() {
     saveConsent("denied");
     stopAfterOptOut();
+    reportStatus();
   },
-  /** Whether Recap is recording now: started, and not waiting for consent or opted out. */
+  /** Whether Recap is recording now: started, and not stopped by the gate, consent or opt-out. */
   isRecording() {
-    return _initialized && allowed();
+    return _capturing && allowed();
+  },
+  /**
+   * Whether Recap is running on this page and, if not, why: `{ running, recording, reason }`.
+   * `recording` is true while this tab's page is recorded for replay. `reason` is `'running'`, or
+   * what stops it: `'not-started'`, `'host-not-listed'`, `'excluded-path'`, `'gpc'`, `'opted-out'`,
+   * `'consent-needed'`, `'in-frame'`, `'secret-key'` or `'switched-off'`.
+   */
+  status() {
+    return currentStatus();
   },
   /** Record a custom event, e.g. Recap.track('added_to_basket', { sku: 'A1' }). Sent only when connected. */
   track(name, props = {}) {
@@ -3666,12 +4028,19 @@ const Recap = {
     _remote?.stop();
     _remote = null;
     _remoteConfig = null;
+    _unsampled = false;
     _early = [];
     _config = {};
     _consent = null;
+    _switch = void 0;
+    _keyChecked = void 0;
+    _secretKey = null;
+    _sawExcludedPath = false;
+    _loggedReason = null;
     setScreenNamer(null);
     setLabelMode("text");
     _initialized = false;
+    _capturing = false;
   }
 };
 function stopAfterOptOut() {
@@ -3682,16 +4051,17 @@ function stopAfterOptOut() {
   void deleteLocalData();
 }
 function resumeAfterOptIn(wasRecording) {
-  if (!_initialized) return;
+  if (!_capturing) return;
   connectIfAllowed();
   if (!wasRecording && allowed()) emitCurrentPage();
 }
 function onConsentChangedElsewhere(e) {
   if (e.key !== KEY_CONSENT && e.key !== null) return;
-  const was = _initialized && allowed();
+  const was = _capturing && allowed();
   _consent = null;
   if (consent() === "denied") stopAfterOptOut();
   else if (consent() === "granted") resumeAfterOptIn(was);
+  reportStatus();
 }
 function setScriptDefaults(config) {
   _scriptDefaults = given(config);
@@ -3726,11 +4096,14 @@ function togglePanel() {
     void flush().then(() => openPanel());
   }
 }
+function panelOn() {
+  return _capturing && pageBlock() === null && (_config.panel ?? !connected());
+}
 function applyPanel(show) {
   _panelStops.forEach((fn) => fn());
   _panelStops = [];
   const c = _config;
-  if (c.panel === false) {
+  if (!panelOn()) {
     if (isPanelOpen()) closePanel();
     return;
   }

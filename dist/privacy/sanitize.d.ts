@@ -3,16 +3,35 @@
  * Returns pathname only.
  */
 export declare function sanitizeUrl(rawUrl: string, stripQuery?: boolean): string;
-/** Elements (and everything inside them) that are never tracked: no taps, no recordings. */
-export declare const EXCLUDE_SELECTOR = "[data-ut-no-track], .ut-block, .recap-private";
+/**
+ * A page address for a recording: origin and path, with the query string only when it is kept
+ * (`stripQuery` false) and never the hash. Same rules as sanitizeUrl, plus the origin, because the
+ * Replayer needs an absolute address to load the page's relative images and stylesheets. Never
+ * passed through the screenName hook: it must stay an address.
+ */
+export declare function sanitizeHref(rawUrl: string, stripQuery?: boolean): string;
+/**
+ * The privacy marker: elements (and everything inside them) that are never tracked. No taps are
+ * counted there, they are left out of recordings, and on <html> or <body> scroll depth stops too.
+ * `data-recap-private` and `class="recap-private"` are the documented names; `data-ut-no-track`
+ * and `ut-block` are older names that keep working. (The script tag's own `data-recap`
+ * attribute is a different attribute and marks nothing.)
+ */
+export declare const EXCLUDE_SELECTOR = "[data-recap-private], .recap-private, [data-ut-no-track], .ut-block";
+/**
+ * Text that is never used: not in tap labels or headings, and replaced with * in recordings.
+ * `data-recap-mask` and `class="recap-mask"` are the documented names; `ut-mask` keeps working.
+ */
+export declare const MASK_SELECTOR = "[data-recap-mask], .recap-mask, .ut-mask";
 /**
  * Return true if an element should be completely excluded from tracking: it, or an element around
- * it, has data-ut-no-track, class ut-block or class recap-private.
+ * it, has the privacy marker (data-recap-private or class recap-private, or the older
+ * data-ut-no-track or ut-block).
  */
 export declare function isExcluded(el: Element): boolean;
 /**
- * Return true if an element's text should never be used: it, or an element around it, has class
- * ut-mask.
+ * Return true if an element's text should never be used: it, or an element around it, has the
+ * mask marker (data-recap-mask or class recap-mask, or the older ut-mask).
  */
 export declare function isMasked(el: Element): boolean;
 /**
@@ -20,7 +39,7 @@ export declare function isMasked(el: Element): boolean;
  * - `'text'`: also the element's visible text (first 50 characters).
  * - `'attributes'`: only aria-label, aria-labelledby, title, alt and placeholder, never visible text.
  * - `'none'`: only labels you write yourself with data-ut-label.
- * data-ut-label is always used, in every mode and inside ut-mask: it is the developer's own words.
+ * data-ut-label is always used, in every mode and inside the mask marker: it is the developer's own words.
  */
 export type LabelMode = 'none' | 'attributes' | 'text';
 export declare function setLabelMode(mode: LabelMode): void;
@@ -36,7 +55,7 @@ export declare function interactiveTarget(el: Element): Element;
  * Extract the best human-readable label for a clicked element.
  * Priority: data-ut-label > aria-label > aria-labelledby > title > alt >
  *           visible text (50 chars, `'text'` mode only) > placeholder.
- * Inside ut-mask, and in `'none'` mode, only data-ut-label is used.
+ * Inside the mask marker (data-recap-mask, recap-mask, ut-mask), and in `'none'` mode, only data-ut-label is used.
  */
 export declare function extractLabel(el: Element, mode?: LabelMode): string | null;
 /** Turns a page path into the name a screen is counted under. */

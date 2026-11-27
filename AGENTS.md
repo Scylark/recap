@@ -277,25 +277,64 @@ network access. Upload errors are logged when `debug` is on.
 
 ## Websites and web apps
 
-If the developer also has a website or web app, it can report to the same database and dashboard.
-1. Install `recap-ux` (and `rrweb@2.2.2` if they want page replays) and call
-   `Recap.init({ appId, supabase: { url, anonKey }, panel: false, recordings: { record } })` once at start-up, with a
-   different `appId` from the mobile app (e.g. `my-shop-web`). Importing the module starts nothing until `init()`.
-   `panel: false` keeps Recap's researcher panel, shortcut and three-finger hold away from visitors. With the script
-   tag, use `data-panel="false"` (see the README).
-2. Run `supabase/migrations/20261127025000_recap_dom.sql` and `20261127040000_recap_dom_limits.sql` if they turn on recordings (the second makes web recordings follow the Storage page limits).
-3. **Ask** which parts of the site show personal details (account pages, order history, messages) and add
-   `class="recap-private"` to them: taps there aren't counted and they are left out of recordings. Form fields are
-   always masked. Tap labels come only from `aria-label`, `title`, `alt` and similar once sessions go to the
-   dashboard (`labels: 'attributes'`), never on-screen text; use `labels: 'none'` if even those can hold personal
-   details, and `class="ut-mask"` on anything whose text must never be used. If recordings are on and pages show
-   personal text outside the private parts, set `recordings: { record, maskText: true }` (or a selector).
-4. **Consent. Ask** the same question as on mobile (Step 5). If they need opt-in, set `requireConsent: true` and
-   call `Recap.optIn()` from their consent banner. Either way, wire `Recap.optOut()` to a settings switch.
-5. If one screen has several addresses (`/plan` and `/plan.html`, or ids in the path), pass
-   `screenName: (path) => …` in the first `init()` call so they count as one screen.
-6. Add `Recap.track('event_name', { … })` for the steps that matter (sign-up, add to basket, purchase), as on mobile.
-7. Verify: browse the site with the browser console open (`debug: true` in `Recap.init`), then check the session in the dashboard.
+If the developer also has a website or web app, it can report to the same database and dashboard. The web
+script's defaults are made for a live site, so **don't write a loader or wrapper around it**: limiting it to
+production hostnames, skipping private pages, Global Privacy Control, iframes, consent, test switches and
+loading rrweb for replays are all built in. The README section "Add Recap to a live website" has the full
+option table.
+
+1. **Database.** Same project as the app (Step 1). For replays, also make sure
+   `supabase/migrations/20261127025000_recap_dom.sql` and `20261127040000_recap_dom_limits.sql` have run (the
+   second makes web recordings follow the Storage page limits). Use the anon or publishable key: Recap refuses a
+   `service_role` or `sb_secret_` key with a console error and sends nothing.
+2. **Ask** for the site's production hostnames (e.g. `example.com` and its subdomains) and which pages or parts
+   of pages show personal details (account pages, order history, messages, anything with an id in the address).
+3. **Add it.** For a site without a build step, paste one script tag on every page, with a different
+   `data-app-id` from the mobile app:
+   ```html
+   <script defer
+     src="https://cdn.jsdelivr.net/gh/Scylark/recap@v1.3.0/dist/recap.min.js"
+     integrity="REPLACE_WITH_SRI" crossorigin="anonymous"
+     data-app-id="my-site-web"
+     data-supabase-url="https://abcd1234.supabase.co"
+     data-supabase-key="sb_publishable_…"
+     data-hosts="example.com,*.example.com"
+     data-exclude-paths="/account,/admin"
+     data-recordings="true"
+     data-record-sample="0.2"></script>
+   ```
+   With a bundler: `npm install recap-ux` (it brings `rrweb@2.2.2`) and call, once at start-up,
+   `Recap.init({ appId, supabase: { url, anonKey }, hosts, excludePaths, recordings: { record, sampleRate } })`
+   with `import { record } from 'rrweb'`. Importing the module starts nothing until `init()`.
+   Once sessions go to the dashboard, the researcher panel, its shortcut and three-finger hold are off for
+   visitors, and tap labels come only from `aria-label`, `title`, `alt` and similar, never on-screen text.
+   Don't add `panel: false`; add `panel: true` only if the owner wants the panel on the live site.
+4. **Mark private parts.** Whole pages go in `data-exclude-paths` / `excludePaths` (string prefixes; RegExps in
+   `init()`). Inside other pages, add `data-recap-private` to anything showing personal details: taps there aren't
+   counted and it is left out of recordings. Add `data-recap-mask` to text that must never be used, such as a
+   signed-in name: it is never a tap label and shows as `*` in replays. Form fields are always masked. If pages
+   show personal text outside those parts, use `data-mask-text="true"` (or `recordings: { maskText: true }`). Use
+   `labels: 'none'` if even `aria-label`s can hold personal details. (The older `class="recap-private"`,
+   `data-ut-no-track`, `ut-block` and `ut-mask` still work; use the `data-recap-*` names in new code.)
+5. **Consent. Ask** the same question as on mobile (Step 5). If they need opt-in, add `data-require-consent="true"`
+   (or `requireConsent: true`) and call `Recap.optIn()` from their consent banner. Either way, wire
+   `Recap.optOut()` to a settings switch. Global Privacy Control is respected by default.
+6. If one screen has several addresses (`/plan` and `/plan.html`, or ids in the path), pass
+   `screenName: (path) => …` in the first `init()` call so they count as one screen. With the script tag, add
+   `data-auto-init="false"` and call `Recap.init({ screenName })` on `DOMContentLoaded`; the tag's settings still apply.
+7. Add `Recap.track('event_name', { … })` for the steps that matter (sign-up, add to basket, purchase), as on mobile.
+8. **Verify.** Open a page with `?recap=on` (it also works on `localhost` and preview deploys) and the console
+   open: Recap logs `[Recap] running…` or why it isn't, what it uploads and each recording snapshot's size.
+   `Recap.status()` returns `{ running, recording, reason }`. Use `?recap=record` to record that tab for replay,
+   `?recap=off` to keep the developer's own visits out, and `?recap=auto` to clear the switch. Then check the
+   session in the dashboard.
+9. In a Capacitor app the page's hostname is `localhost`, so `hosts` leaves the app out. If the owner wants app
+   sessions too, add `data-auto-init="false"` and call
+   `Recap.init({ hosts: window.Capacitor?.isNativePlatform?.() ? ['localhost'] : [...] })` on `DOMContentLoaded`.
+   Recap does nothing inside an iframe once sending; `allowInFrames: true` changes that.
+
+If the site sets a Content-Security-Policy, `script-src` must allow the folder `recap.min.js` comes from
+(`recap-rrweb.min.js` loads from the same place) and `connect-src` the Supabase project URL.
 
 ## Configuration reference
 

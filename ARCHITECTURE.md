@@ -30,7 +30,9 @@ src/
   analysis/
     summarize.ts        # Generates AI-readable session-summary.json
   privacy/
-    sanitize.ts         # Element exclusion (.ut-block, data-ut-no-track), text masking (.ut-mask)
+    sanitize.ts         # Privacy marker (data-recap-private), mask marker (data-recap-mask), labels, URLs
+  gate.ts               # Live-site gate: hosts, excludePaths, ?recap= switches, GPC, frames, secret keys
+  rrweb-record.ts       # Entry for dist/recap-rrweb.min.js (rrweb's record, loaded on demand)
 ```
 
 ## Three-layer architecture
@@ -68,20 +70,22 @@ The panel shortcut defaults to `Alt+Shift+Y` (`config.shortcut` or `data-shortcu
 
 ## Privacy guarantees
 
-- No network requests are made unless `endpoint` is explicitly set.
+- No network requests are made unless `endpoint`, `supabase`, `remote` or `connect()` is set.
+- Once sessions go to a dashboard, the panel is off, Global Privacy Control is respected, nothing runs in an iframe and a secret Supabase key is refused (`src/gate.ts`, put together in `src/index.ts`).
 - Form input values are never captured — the capture layer ignores all `input`, `textarea`, and `select` value changes.
-- Elements with `.ut-block` or `data-ut-no-track` are skipped entirely at capture time.
-- Text inside `.ut-mask` elements is replaced with `***` before storage.
+- Elements with the privacy marker (`data-recap-private`, `.recap-private`, or the older `data-ut-no-track`, `.ut-block`) are skipped entirely at capture time and left out of recordings.
+- Text inside the mask marker (`data-recap-mask`, `.recap-mask`, or the older `.ut-mask`) is never used in labels and is replaced with `*` in recordings.
+- Recording addresses (rrweb Meta events) keep only origin and path, like page views.
 - Session data is stored in IndexedDB, scoped to the origin, and auto-purged after 30 days.
 - No cookies. Session identity uses `sessionStorage` (cleared when the tab closes).
 
 ## Build
 
-Two Vite configs produce five output files:
+Two Vite configs produce six output files:
 
 | Config | Output |
 |--------|--------|
-| `vite.config.ts` | `dist/recap.min.js` (UMD), `dist/recap.esm.js`, `dist/recap.cjs.js` |
+| `vite.config.ts` | `dist/recap.esm.js`, `dist/recap.cjs.js`; `--mode script-tag`: `dist/recap.min.js` (UMD); `--mode rrweb`: `dist/recap-rrweb.min.js` (rrweb's `record` as a plain script, loaded on demand) |
 | `vite.react.config.ts` | `dist/react.esm.js`, `dist/react.cjs.js` |
 
 TypeScript declarations are emitted separately via `tsc --emitDeclarationOnly` after both Vite builds complete (to avoid Vite's `emptyOutDir` deleting the generated `.d.ts` files).

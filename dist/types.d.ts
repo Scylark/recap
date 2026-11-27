@@ -1,5 +1,6 @@
 import type { RemoteConfig, RemoteRecordingOptions } from './remote/remote.js';
 export type { RemoteConfig, RemoteRecordingOptions, RrwebRecord } from './remote/remote.js';
+export type { RecapStatus, RecapStatusReason } from './gate.js';
 export type EventType = 'click' | 'scroll' | 'navigation' | 'visibility' | 'resize';
 export interface Viewport {
     width: number;
@@ -67,26 +68,59 @@ export interface RecapConfig {
     /** Your site's version, shown in the dashboard. Script tag: data-app-version. */
     appVersion?: string;
     /**
-     * With `supabase`: record the page for session replay in the dashboard, using rrweb. Pass
-     * `{ record }` from `import { record } from 'rrweb'`, or load rrweb's script first and use `true`.
-     * Every form field is masked; anything with class "recap-private" or data-ut-no-track is left out.
-     * Script tag: data-recordings="true".
+     * With `supabase`: record the page for session replay in the dashboard, using rrweb 2.2.2.
+     * `true` is enough with the script tag: tabs sampled in load recap-rrweb.min.js from the same
+     * folder as recap.min.js. In a module build, pass `{ record }` from `import { record } from
+     * 'rrweb'`, or `{ src }` with the address of recap-rrweb.min.js. Every form field is masked, and
+     * anything with the privacy marker (`data-recap-private`) is left out. Script tag:
+     * data-recordings="true".
      */
     recordings?: boolean | RemoteRecordingOptions;
-    /** Log what's sent to the dashboard in the console. */
+    /**
+     * Log what Recap is doing in the console: why it isn't running (once), what's sent, recording
+     * snapshot sizes. `?recap=on` in the address turns it on for one tab. Script tag: data-debug="true".
+     */
     debug?: boolean;
     /**
-     * The researcher panel and the shortcut and touch-hold that open it. `false` turns all three off
-     * (use it on live sites, so visitors never see it). Default true. Script tag: data-panel="false".
+     * The researcher panel and the shortcut and touch-hold that open it. Default: on while data stays
+     * in the browser, off once sessions go to a dashboard (`supabase`, `remote` or `connect()`), so
+     * visitors to a live site never see it. `true` turns it on there too, `false` turns it off
+     * everywhere. Script tag: data-panel="true" or "false".
      */
     panel?: boolean;
+    /**
+     * Only run on these hostnames: exact (`'example.com'`), or `'*.example.com'` for its subdomains
+     * (list both for both). Anywhere else (localhost, preview deploys) Recap does nothing, unless the
+     * address has `?recap=on`. Default: everywhere. Script tag: data-hosts="example.com,*.example.com".
+     */
+    hosts?: string[];
+    /**
+     * Pages where nothing runs: a string is a path prefix (`'/admin'` also covers `/admin/users` and
+     * `/admin.html`), a RegExp is tested against the path. In a single-page app, going to such a page
+     * stops capture there and turns page recording off until the next full page load. Script tag:
+     * data-exclude-paths="/account,/admin".
+     */
+    excludePaths?: Array<string | RegExp>;
+    /**
+     * Respect Global Privacy Control: when the browser sends it (`navigator.globalPrivacyControl`),
+     * nothing is captured. Default: true once sessions go to a dashboard, false while data stays in
+     * the browser. Script tag: data-respect-gpc="false".
+     */
+    respectGPC?: boolean;
+    /**
+     * Run inside an iframe. Default: false once sessions go to a dashboard (nothing runs in a frame,
+     * so a page embedded elsewhere isn't counted twice or under someone else's site), true while data
+     * stays in the browser. Script tag: data-allow-in-frames.
+     */
+    allowInFrames?: boolean;
     /** Keyboard shortcut for the panel, e.g. "ctrl+shift+y", or false for none. Default "alt+shift+y". */
     shortcut?: string | false;
     stripQueryParams?: boolean;
     /**
      * Where tap labels come from. `'text'`: also the tapped element's visible text. `'attributes'`:
      * only aria-label, aria-labelledby, title, alt and placeholder. `'none'`: only your own
-     * data-ut-label. data-ut-label is always used, and inside `.ut-mask` it is the only source.
+     * data-ut-label. data-ut-label is always used, and inside the mask marker (`data-recap-mask`,
+     * `.recap-mask`) it is the only source.
      * Default: `'text'` while data stays in the browser, `'attributes'` once sessions go to a
      * dashboard (`supabase`, `remote` or `connect()`). Script tag: data-labels.
      */
