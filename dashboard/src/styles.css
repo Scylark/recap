@@ -151,6 +151,44 @@ table.clickable tbody tr:hover { background: var(--accent-soft); }
 .phone-canvas { position: absolute; inset: 0; }
 .phone-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
 
+/* Web page heatmap: the whole page at its own width, scaled to fit, with heat and scroll lines over it. */
+.pair.heat-pair > .heat-main { max-width: none; flex: 0 1 auto; min-width: 0; }
+.heat-kpis { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); max-width: 900px; }
+.page-map-box { max-width: 100%; }
+.heat-loading { width: 300px; max-width: 100%; height: 420px; display: grid; place-items: center; border: 1px dashed var(--line); border-radius: 12px; }
+.page-map {
+  position: relative; overflow: hidden; margin: 0 auto 8px;
+  border: 1px solid var(--line); border-radius: 12px; background: #fff;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+}
+.page-map-inner { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.page-map-page, .page-map-page .replayer-wrapper, .page-map-page iframe { position: absolute; left: 0; top: 0; border: 0; pointer-events: none; }
+.page-map-page .replayer-wrapper { transform: none !important; }
+.page-map-page .replayer-mouse, .page-map-page .replayer-mouse-tail { display: none !important; }
+.page-map-grid {
+  position: absolute; inset: 0; background-color: var(--panel);
+  background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 25% 400px;
+}
+.page-map-heat { position: absolute; left: 0; top: 0; pointer-events: none; }
+.page-map-marks { position: absolute; inset: 0; pointer-events: none; }
+.page-map-line { position: absolute; left: 0; right: 0; border-top: 2px dashed rgba(15, 23, 42, 0.55); }
+.page-map-line span {
+  position: absolute; right: 6px; top: 4px; font-size: 11px; font-weight: 600; line-height: 1.3;
+  background: rgba(15, 23, 42, 0.82); color: #fff; padding: 2px 6px; border-radius: 6px; white-space: nowrap;
+}
+.page-map-line.fold { border-top-color: var(--accent); }
+.page-map-line.fold span { background: var(--accent); }
+.page-map-rage { position: absolute; width: 30px; height: 30px; margin: -15px 0 0 -15px; border: 3px solid #e11d48; border-radius: 50%; box-shadow: 0 0 0 2px #fff; }
+.page-map-hot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--accent); }
+.page-map-note { position: absolute; left: 8px; right: 8px; top: 8px; padding: 6px 8px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); font-size: 12px; }
+.page-map-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+table.clickable tbody tr.on { background: var(--accent-soft); }
+table.clickable tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.row.side-head { align-items: baseline; margin-bottom: 0; }
+.warn-text { color: var(--warn); font-weight: 600; }
+.seg button:disabled { opacity: 0.45; cursor: default; }
+
 @media (max-width: 800px) {
   .shell header { padding: 12px 16px; gap: 12px; }
   .controls { margin-left: 0; }

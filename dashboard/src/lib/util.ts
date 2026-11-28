@@ -98,6 +98,30 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): { data: T | 
   return { ...state, reload: () => setTick((t) => t + 1) };
 }
 
+/**
+ * useAsync whose result belongs to the inputs it was loaded for. While new inputs load, `data` is null
+ * rather than the old inputs' result, so one device's taps are never drawn over another's page.
+ * Inputs must be plain values (they are compared as JSON).
+ */
+export function useKeyedAsync<T>(fn: () => Promise<T>, deps: unknown[]): { data: T | null; error: string | null; loading: boolean; reload: () => void } {
+  const key = JSON.stringify(deps);
+  const [state, setState] = useState<{ key: string | null; data: T | null; error: string | null }>({ key: null, data: null, error: null });
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let live = true;
+    fn().then(
+      (data) => live && setState({ key, data, error: null }),
+      (err: unknown) => live && setState({ key, data: null, error: err instanceof Error ? err.message : String(err) }),
+    );
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, tick]);
+  const fresh = state.key === key;
+  return { data: fresh ? state.data : null, error: fresh ? state.error : null, loading: !fresh, reload: () => setTick((t) => t + 1) };
+}
+
 export function readPref(key: string, fallback: string): string {
   try {
     return localStorage.getItem(`recap:${key}`) ?? fallback;

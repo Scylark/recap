@@ -1,10 +1,12 @@
-// Demo data for `npm run demo` and the public preview. Two apps:
+// Demo data for `npm run demo` and the public preview. Three apps:
 //   * "test-shop": the real sessions captured by the end-to-end test (SDK in an Expo app → database).
 //   * "demo-shop": generated sample sessions for a fuller picture.
+//   * "demo-site": a sample website visited from phones and desktops, with page recordings (website.ts).
 
 import type { StorageSettings } from '../lib/data';
 import type { EventRow, Member, SessionRow } from '../lib/types';
 import e2e from './e2e-run.json';
+import { buildWebsite, type DomRow } from './website';
 
 export interface Dataset {
   sessions: SessionRow[];
@@ -12,6 +14,8 @@ export interface Dataset {
   members: Member[];
   screenshots: ScreenshotRow[];
   frames: FrameRow[];
+  /** Web page recordings (rrweb), for the sample website. */
+  dom: DomRow[];
   settings: StorageSettings;
 }
 
@@ -223,14 +227,17 @@ export function buildDataset(now = Date.now()): Dataset {
     const replay_bytes = replayBytes.get(s.id) ?? 0;
     return { ...s, replay_bytes, dom_bytes: 0, has_recording: replay_bytes > 0 };
   };
+  const site = buildWebsite(now);
   return {
     sessions: [
       ...g.sessions.map(withRecording),
+      ...site.sessions,
       ...real.sessions.map(({ created_at: _c, ...s }) =>
         withRecording({ ...s, started_at: move(s.started_at), last_seen_at: move(s.last_seen_at) }),
       ),
     ],
-    events: [...g.events, ...real.events.map((e) => ({ ...e, at: move(e.at) }))],
+    events: [...g.events, ...site.events, ...real.events.map((e) => ({ ...e, at: move(e.at) }))],
+    dom: site.dom,
     members: [
       { email: 'demo@example.com', role: 'admin', created_at: new Date(now - 5 * 86_400_000).toISOString() },
       { email: 'design@example.com', role: 'viewer', created_at: new Date(now - 86_400_000).toISOString() },
