@@ -239,7 +239,8 @@ const PAGE = 1000;
 
 /**
  * Read up to `max` rows, newest first by id, in pages of 1,000. Each page starts below the last id
- * read (not at an offset), so rows that arrive while it reads are never counted twice. `capped` is
+ * read (not at an offset), so rows that arrive while it reads are never counted twice. "Newest" is
+ * by arrival in the database rather than the browser's own time (`at`): close, and stable to page by. `capped` is
  * true only when there were more than `max`. `page(beforeId, n)` builds one page's query: ordered by
  * id descending, below `beforeId` when given, at most `n` rows.
  */
