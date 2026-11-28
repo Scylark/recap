@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  aboveFoldShare,
   busiestDevice,
   depthToY,
   deviceClass,
@@ -10,6 +11,7 @@ import {
   rageTaps,
   scrollReach,
   toTap,
+  targetsCsv,
   topTargets,
   type Anchor,
   type TapRow,
@@ -189,5 +191,30 @@ describe('drawing a recorded page at full length', () => {
     expect((fixed.childNodes[2]!.attributes as Record<string, string>).style).toBe('height:422px');
     expect((out[1]!.data as { initialOffset: unknown }).initialOffset).toEqual({ top: 0, left: 0 });
     expect(node.childNodes[2]!.attributes).toEqual({ style: 'height:50vh' });
+  });
+});
+
+describe('for reports', () => {
+  it('counts the taps made without scrolling', () => {
+    const top = toTap(webTap({ x: 1, y: 100, nx: 0.1, ny: 100 / 844, pageY: 100 }));
+    const low = toTap(webTap({ x: 1, y: 100, nx: 0.1, ny: 100 / 844, pageY: 1600 }));
+    expect(aboveFoldShare([top, low, low, top])).toBe(0.5);
+    expect(aboveFoldShare([])).toBeNull();
+  });
+
+  it('writes Most tapped as CSV that a spreadsheet will not run as a formula', () => {
+    const csv = targetsCsv(
+      [
+        { key: 'label:Buy now', name: 'Buy now', count: 12, visits: 9, dead: false },
+        { key: 'sel:#price', name: '=HYPERLINK("http://x")', count: 3, visits: 2, dead: true },
+        { key: 'sel:#a', name: 'Plans, prices', count: 1, visits: 1, dead: false },
+      ],
+      30,
+    );
+    const lines = csv.trim().split('\r\n');
+    expect(lines[0]).toBe('Element,Selector or label,Taps,Visits that tapped,Share of visits,Dead tap');
+    expect(lines[1]).toBe('Buy now,Buy now,12,9,30%,no');
+    expect(lines[2]).toBe('"\'=HYPERLINK(""http://x"")",#price,3,2,7%,yes');
+    expect(lines[3]).toBe('"Plans, prices",#a,1,1,3%,no');
   });
 });

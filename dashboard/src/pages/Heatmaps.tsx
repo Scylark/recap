@@ -11,9 +11,11 @@ import {
   deviceClass,
   isDeadTap,
   layoutViewport,
+  aboveFoldShare,
   rageTaps,
   scrollReach,
   targetKey,
+  targetsCsv,
   toTap,
   topTargets,
 } from '../lib/heatmap';
@@ -54,7 +56,17 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
   const allTaps = useMemo(() => (activity.data?.taps ?? []).map(toTap), [activity.data]);
   const taps = useMemo(() => allTaps.filter((t) => inSegment(t.sessionId)), [allTaps, inSegment]);
   const web = allTaps.length ? allTaps.some((t) => t.web) : [...(activity.data?.sessions.values() ?? [])].some((s) => s.platform === 'web');
+  // A size is there to look at when it has taps or visits (a size can be scrolled and never tapped).
   const counts = countByDevice(taps);
+  const visitsBy = useMemo(() => {
+    const out: Record<DeviceClass, number> = { phone: 0, tablet: 0, desktop: 0 };
+    const a = activity.data;
+    if (a) for (const v of a.views) {
+      const s = a.sessions.get(v.sessionId);
+      if (s && inSegment(v.sessionId)) out[deviceClass(s.screen_width)]++;
+    }
+    return out;
+  }, [activity.data, inSegment]);
   const shown: DeviceClass = device ?? busiestDevice(taps);
   const here = useMemo(() => taps.filter((t) => t.device === shown), [taps, shown]);
   const viewport = layoutViewport(here, shown);
@@ -93,9 +105,13 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
     [visits],
   );
   const snapshotKey = recorded.slice(0, 8).map((v) => `${v.sessionId}:${v.tMs}`).join(',');
+  // Which recorded visit to draw: the newest first, and the next one on request (the newest may have
+  // had a menu open or been signed out).
+  const [snapFrom, setSnapFrom] = useState(0);
+  useEffect(() => setSnapFrom(0), [snapshotKey]);
   const snapshot = useAsync(
-    () => (web && recorded.length ? pageSnapshotFor(recorded) : Promise.resolve(null)),
-    [web, snapshotKey], // eslint-disable-line react-hooks/exhaustive-deps
+    () => (web && recorded.length ? pageSnapshotFor(recorded, snapFrom) : Promise.resolve(null)),
+    [web, snapshotKey, snapFrom], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const shot = useAsync(
     () => (current && !web ? screenshotFor(appId, current) : Promise.resolve(null)),
@@ -105,6 +121,7 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
   if (screens.data && screens.data.length === 0) return <Empty />;
 
   const visitCount = new Set(visits.map((v) => v.sessionId)).size;
+  const fold = aboveFoldShare(here);
   const half = reach.find((r) => r.depth === 50);
   const loading = activity.loading || (!activity.data && !activity.error);
 
@@ -129,7 +146,7 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
               key={d.key}
               className={shown === d.key ? 'on' : ''}
               aria-pressed={shown === d.key}
-              disabled={!counts[d.key] && shown !== d.key}
+              disabled={!counts[d.key] && !visitsBy[d.key] && shown !== d.key}
               onClick={() => setDevice(d.key)}
             >
               {d.label} {counts[d.key] ? `(${counts[d.key].toLocaleString()})` : ''}
@@ -166,6 +183,13 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
         <Kpi label="Visits" value={loading ? '…' : visitCount.toLocaleString()} />
         <Kpi label="Taps" value={loading ? '…' : here.length.toLocaleString()} />
         {web && <Kpi label="Scrolled halfway" value={loading || !visitCount ? '–' : `${Math.round((half?.share ?? 0) * 100)}%`} />}
+        {web && (
+          <Kpi
+            label="Taps above the fold"
+            value={loading || fold === null ? '–' : `${Math.round(fold * 100)}%`}
+            hint="Taps made without scrolling, in the window they were made in"
+          />
+        )}
         <Kpi label="Rage taps" value={loading ? '…' : rage.length.toLocaleString()} hint="Three or more quick taps on one spot in one visit: something that didn't respond" />
         {web && (
           <Kpi
@@ -206,7 +230,26 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
               ? 'Each tap is where it landed on the page, at this device size; taps on a bar that stays on screen are drawn on the bar.'
               : 'Positions are shares of the screen, so they line up across phone sizes.'}
           </p>
-          {web && !snapshot.loading && !snapshot.data && (
+          {web && snapshot.data && (
+            <p className="muted small">
+              Page from a visit on {new Date(snapshot.data.startedAt).toLocaleString()}, in a {snapshot.data.width}×{snapshot.data.height}{' '}
+              window. <a href={`#/session/${encodeURIComponent(snapshot.data.sessionId)}`}>Watch that visit</a>
+              {recorded.length > 1 && (
+                <>
+                  {' · '}
+                  <button className="link" onClick={() => setSnapFrom(snapshot.data!.index + 1)}>
+                    Try another recording
+                  </button>
+                </>
+              )}
+            </p>
+          )}
+          {web && !snapshot.loading && !snapshot.data && snapFrom > 0 && (
+            <p className="muted small">
+              No more recordings at this size. <button className="link" onClick={() => setSnapFrom(0)}>Back to the newest</button>
+            </p>
+          )}
+          {web && !snapshot.loading && !snapshot.data && snapFrom === 0 && (
             <p className="muted small">
               No recorded visit of this screen at this size yet, so the taps are drawn on a blank page. Turn on{' '}
               <code>recordings</code> in the web script and the newest recorded visit is drawn here.
@@ -220,7 +263,24 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
           )}
         </div>
         <div className="pair-side">
-          <h3>Most tapped</h3>
+          <div className="row space side-head">
+            <h3>Most tapped</h3>
+            {targets.length > 0 && (
+              <button
+                className="link"
+                onClick={() => {
+                  const blob = new Blob([targetsCsv(targets, visitCount)], { type: 'text/csv' });
+                  const a = document.createElement('a');
+                  a.href = URL.createObjectURL(blob);
+                  a.download = `recap-taps-${(current ?? 'screen').replace(/[^\w-]+/g, '_').replace(/^_+|_+$/g, '') || 'home'}-${shown}.csv`;
+                  a.click();
+                  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+                }}
+              >
+                Download CSV
+              </button>
+            )}
+          </div>
           {!loading && targets.length === 0 && (
             <p className="muted small">
               {web ? (

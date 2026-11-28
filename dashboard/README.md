@@ -10,8 +10,15 @@ host) that reads sessions from your own Supabase project.
   rippling in, repeated taps in red, scrolls, events and time away, with speed and skip-pauses controls),
   a screen-by-screen timeline, tap heatmap per visit, and **Copy AI summary** to paste
   into Claude or ChatGPT for a UX analysis
-- **Heatmaps:** all taps on a screen across sessions, drawn over a picture of that screen when the app has
-  `screenshots` turned on, plus the most-tapped named buttons
+- **Heatmaps:** all taps on a screen across sessions.
+  - **Websites:** the whole page at its full length, for Phone, Tablet or Desktop windows, drawn from the
+    newest recorded visit of that page (try another, or watch that visit). Taps go where they landed on
+    the page; taps on a bar that stays on screen go on the bar. With the fold, how far down visits
+    scrolled, rage taps (quick repeated taps on one spot), dead taps (on things that aren't links or
+    buttons), Most tapped with the share of visits, a CSV of it, and visits that did or didn't send one
+    of your events (for example, visits that signed up). See [Heatmaps on a website](../docs/quickstart-web.md#heatmaps-on-a-website).
+  - **Apps:** the screen at a phone's shape, drawn over a picture of that screen when the app has
+    `screenshots` turned on, plus the most-tapped named buttons
 - **Analytics:** Mixpanel-style product analytics on the same data
   - **Trends:** any event over time, as totals or unique people, split by platform, app version, screen,
     OS, device, language or any custom property

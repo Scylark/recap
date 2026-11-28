@@ -340,6 +340,8 @@ export interface PageSnapshot {
   events: DomEvent[];
   width: number;
   height: number;
+  /** Where this visit is in the newest-first list, so the page can ask for the next one. */
+  index: number;
 }
 
 /**
@@ -349,16 +351,20 @@ export interface PageSnapshot {
  */
 export async function pageSnapshotFor(
   visits: { sessionId: string; tMs: number; startedAt: string }[],
+  from = 0,
   tries = 4,
 ): Promise<PageSnapshot | null> {
-  const ordered = [...visits].sort((a, b) => Date.parse(b.startedAt) + b.tMs - (Date.parse(a.startedAt) + a.tMs));
   const seen = new Set<string>();
+  const ordered = [...visits]
+    .sort((a, b) => Date.parse(b.startedAt) + b.tMs - (Date.parse(a.startedAt) + a.tMs))
+    .filter((v) => {
+      const key = `${v.sessionId}:${v.tMs}`;
+      return seen.has(key) ? false : (seen.add(key), true);
+    });
   let attempts = 0;
-  for (const v of ordered) {
+  for (let index = Math.max(0, from); index < ordered.length; index++) {
+    const v = ordered[index]!;
     if (attempts >= tries) break;
-    const key = `${v.sessionId}:${v.tMs}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
     attempts++;
     const res = await db()
       .from('recap_dom')
@@ -381,7 +387,7 @@ export async function pageSnapshotFor(
     const m = (meta?.data ?? {}) as { width?: number; height?: number; href?: string };
     const full = events[fullAt]!;
     if (!meta) meta = { type: 4, timestamp: full.timestamp - 1, data: { href: 'about:blank', width: 0, height: 0 } };
-    return { sessionId: v.sessionId, startedAt: v.startedAt, events: [meta, full], width: Number(m.width) || 0, height: Number(m.height) || 0 };
+    return { sessionId: v.sessionId, startedAt: v.startedAt, events: [meta, full], width: Number(m.width) || 0, height: Number(m.height) || 0, index };
   }
   return null;
 }

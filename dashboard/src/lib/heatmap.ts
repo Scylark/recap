@@ -301,3 +301,26 @@ export function topTargets(taps: Tap[], name?: (selector: string) => string | nu
     .map(({ sessions, ...v }) => ({ ...v, visits: sessions.size }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
+
+/** Share of taps that were above the fold of the window they were made in. */
+export function aboveFoldShare(taps: Tap[]): number | null {
+  const web = taps.filter((t) => t.web);
+  if (!web.length) return null;
+  return web.filter((t) => (t.pageY ?? t.clientY) < t.vh).length / web.length;
+}
+
+/**
+ * Most tapped as CSV, for a report. Names come from recorded pages, which a visitor's browser wrote,
+ * so a cell that a spreadsheet would run as a formula (=, +, -, @, tab, return) starts with a quote.
+ */
+export function targetsCsv(targets: Target[], visits: number): string {
+  const cell = (v: string | number) => {
+    let s = String(v);
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const rows = [['Element', 'Selector or label', 'Taps', 'Visits that tapped', 'Share of visits', 'Dead tap']];
+  for (const t of targets)
+    rows.push([t.name, t.key.replace(/^(label|sel):/, ''), String(t.count), String(t.visits), visits ? `${Math.round((t.visits / visits) * 100)}%` : '', t.dead ? 'yes' : 'no']);
+  return rows.map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
+}
