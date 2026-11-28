@@ -132,7 +132,9 @@ export interface RecapConfig {
    * Take one picture of each screen (once per app version, per install) to show behind heatmaps.
    * Needs react-native-view-shot passed to RecapProvider as `captureRef`.
    * Pictures show whatever is on screen, so the safe setting is `__DEV__`: you capture clean
-   * pictures from your own test phone and real users are never photographed.
+   * pictures from your own test phone and real users are never photographed. A picture is skipped
+   * (and tried again on a later visit) while the keyboard is open, a <RecapPrivate> is mounted or
+   * the app is in the background, and never taken without consent or after opt-out.
    * Default false.
    */
   screenshots?: boolean | { exclude?: string[]; delayMs?: number };
@@ -144,6 +146,8 @@ export interface RecapConfig {
    * Privacy: recording pauses while the keyboard is open, on `exclude` screens, and while any
    * <RecapPrivate> is on screen. Wrap anything showing personal details (forms, account pages,
    * messages) in <RecapPrivate>. Paused moments show as "Hidden for privacy" in the replay.
+   * The keyboard pause covers typing only: a field that shows its value once the keyboard closes
+   * is visible in recordings unless it is inside <RecapPrivate>.
    */
   recordings?: boolean | RecordingOptions;
 

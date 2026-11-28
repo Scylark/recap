@@ -132,11 +132,12 @@ export default function App() {
 
 ```tsx
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Stack, usePathname } from 'expo-router';
+import { Stack, useSegments } from 'expo-router';
 import { RecapProvider, useRecapScreen } from '@recap-ux/react-native';
 
 function ScreenTracker() {
-  useRecapScreen(usePathname());
+  const segments = useSegments();
+  useRecapScreen('/' + segments.join('/')); // "/orders/[id]", never "/orders/8812"
   return null;
 }
 
@@ -149,6 +150,10 @@ export default function RootLayout() {
   );
 }
 ```
+
+Name screens by route pattern, not by address. `usePathname()` returns the real path, such as `/orders/8812`
+or `/user/jane`, which puts order numbers and names into analytics. `useSegments()` keeps dynamic segments as
+written, so every order page counts as one screen, `/orders/[id]`.
 
 **Other navigation:** call `recap.screen('ScreenName')` whenever the visible screen changes.
 

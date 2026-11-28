@@ -1,7 +1,7 @@
 // Recap core: session handling, consent, sampling, the offline queue and uploads.
 // Pure TypeScript with no React Native imports, so it runs (and is tested) anywhere.
 
-import { endpointTransport, supabaseTransport } from './transports';
+import { endpointTransport, secretKeyKind, secretKeyMessage, supabaseTransport } from './transports';
 import type {
   DeviceInfo,
   FramesPayload,
@@ -56,9 +56,33 @@ const DEFAULT_DEVICE: DeviceInfo = {
   locale: null,
 };
 
-export function uuid(random: () => number = Math.random): string {
-  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
-  if (c?.randomUUID) return c.randomUUID();
+type CryptoLike = { randomUUID?: () => string; getRandomValues?: (bytes: Uint8Array) => unknown };
+
+/**
+ * A random v4 UUID for session and install ids. Uses crypto.randomUUID, else crypto.getRandomValues
+ * (Hermes has neither by default; react-native-get-random-values adds the second). Only when both
+ * are missing does it fall back to `random` (Math.random, which is predictable) and call `onWeak`.
+ */
+export function uuid(random: () => number = Math.random, onWeak?: () => void): string {
+  const c = (globalThis as { crypto?: CryptoLike }).crypto;
+  try {
+    if (typeof c?.randomUUID === 'function') return c.randomUUID();
+  } catch {
+    // fall through to getRandomValues
+  }
+  if (typeof c?.getRandomValues === 'function') {
+    try {
+      const b = new Uint8Array(16);
+      c.getRandomValues(b);
+      b[6] = (b[6]! & 0x0f) | 0x40; // version 4
+      b[8] = (b[8]! & 0x3f) | 0x80; // RFC 4122 variant
+      const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+      return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+    } catch {
+      // fall through to the weak fallback
+    }
+  }
+  onWeak?.();
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
     const r = Math.floor(random() * 16);
     return (ch === 'x' ? r : (r & 0x3) | 0x8).toString(16);
@@ -75,13 +99,22 @@ export class RecapCore {
   private sessionStartMs = 0;
   private sampled = true;
   private consent: ConsentState = 'unknown';
+  /** Counts optIn/optOut calls, so saved settings loading at start-up can't undo a newer choice. */
+  private consentChoices = 0;
+  /** Set when the config holds a secret Supabase key: nothing is recorded or sent. */
+  private blocked = false;
+  private weakIdsWarned = false;
   private userId: string | null = null;
+  /** The last signed-in user id seen in the current session, kept through sign-out. */
+  private sessionUser: string | null = null;
   /** Random id kept on this install so returning users can be counted. Not tied to any device or ad id. */
   private anonymousId = '';
 
   private queue: QueuedEvent[] = [];
   /** Events recorded while saved state is still loading. */
   private early: QueuedEvent[] | null = null;
+  /** Resolves once saved state has loaded; null when it has. */
+  private loading: Promise<void> | null = null;
   private sessions = new Map<string, SessionInfo>();
   private inFlight: Promise<void> | null = null;
   private timer: unknown = null;
@@ -91,9 +124,12 @@ export class RecapCore {
   private scrollMax = new Map<string, number>();
   private pendingLabel: { label: string; at: number } | null = null;
   private capture: ScreenCapture | null = null;
+  /** Counts screen views, so a pending screen picture can tell the person has moved on (and maybe back). */
+  private screenVisit = 0;
   /** Screens already photographed on this install, as "screen|appVersion". */
   private shots = new Set<string>();
-  private shooting = new Set<string>();
+  /** Screen pictures waiting or in progress: key to the screen visit they belong to. */
+  private shooting = new Map<string, number>();
 
   // Recording (session replay frames)
   private recTimer: unknown = null;
@@ -139,34 +175,49 @@ export class RecapCore {
       ...device,
       appVersion: config.appVersion ?? device.appVersion ?? null,
     };
-    this.transport =
-      config.transport ??
-      (config.supabase?.url && config.supabase.anonKey
-        ? supabaseTransport(config.supabase)
-        : config.endpoint
-          ? endpointTransport(config.endpoint)
-          : null);
-    if (!this.transport) this.log('no transport configured; events stay on the device');
+    // A secret key in the app would give anyone who has it full access to the database.
+    const secret =
+      secretKeyKind(config.supabase?.anonKey) ??
+      Object.values(config.endpoint?.headers ?? {}).map(secretKeyKind).find(Boolean) ??
+      null;
+    this.blocked = secret !== null;
+    if (secret) console.error(secretKeyMessage(secret));
+    this.transport = secret
+      ? null
+      : (config.transport ??
+        (config.supabase?.url && config.supabase.anonKey
+          ? supabaseTransport(config.supabase)
+          : config.endpoint
+            ? endpointTransport(config.endpoint)
+            : null));
+    if (!this.transport && !secret) this.log('no transport configured; events stay on the device');
 
-    this.anonymousId = uuid(this.random);
+    this.anonymousId = this.newId();
 
     // Start recording straight away; events captured while saved state loads are held back
     // until we know the user's stored consent choice.
     this.startSession();
     this.early = [];
+    let loaded!: () => void;
+    this.loading = new Promise<void>((resolve) => (loaded = resolve));
 
     if (this.storage) {
       try {
+        const choices = this.consentChoices;
         const saved = await this.storage.getItem(KEY_CONSENT);
-        if (saved === 'granted' || saved === 'denied') this.consent = saved;
         const install = await this.storage.getItem(KEY_INSTALL);
-        if (install) this.anonymousId = install;
-        else await this.storage.setItem(KEY_INSTALL, this.anonymousId);
+        // An optIn() or optOut() made while this loaded is newer than what was saved.
+        if (this.consentChoices === choices) {
+          if (saved === 'granted' || saved === 'denied') this.consent = saved;
+          if (install) this.anonymousId = install;
+          else await this.storage.setItem(KEY_INSTALL, this.anonymousId);
+        }
         if (this.session) this.session = { ...this.session, anonymousId: this.anonymousId };
         const shots = await this.storage.getItem(KEY_SHOTS);
         if (shots) for (const k of JSON.parse(shots) as string[]) this.shots.add(k);
         const raw = await this.storage.getItem(KEY_QUEUE);
-        if (raw) {
+        // After an opt-out nothing unsent is kept, even if it was read before the opt-out saved.
+        if (raw && this.consent !== 'denied') {
           const parsed = JSON.parse(raw) as { queue?: QueuedEvent[]; sessions?: SessionInfo[] };
           for (const s of parsed.sessions ?? []) this.sessions.set(s.id, s);
           this.queue = (parsed.queue ?? []).filter((e) => this.sessions.has(e.sessionId));
@@ -178,6 +229,8 @@ export class RecapCore {
 
     const early = this.early;
     this.early = null;
+    this.loading = null;
+    loaded();
     if (this.session) this.sessions.set(this.session.id, this.session);
     if (this.isRecording()) for (const e of early) this.enqueue(e);
 
@@ -202,25 +255,34 @@ export class RecapCore {
 
   /** Whether events are currently being recorded. */
   isRecording(): boolean {
-    if (!this.config || !this.sampled) return false;
+    if (!this.config || !this.sampled || this.blocked) return false;
     if (this.consent === 'denied') return false;
     if (this.config.requireConsent && this.consent !== 'granted') return false;
     return true;
   }
 
+  /**
+   * Starts (or restarts) recording. After an optOut() this begins a new session, so nothing from
+   * before the opt-out can be joined to what comes after it.
+   */
   async optIn(): Promise<void> {
+    const wasDenied = this.consent === 'denied';
+    this.consentChoices++;
     this.consent = 'granted';
+    if (wasDenied && this.session) this.restartSession();
     await this.storage?.setItem(KEY_INSTALL, this.anonymousId);
     await this.storage?.setItem(KEY_CONSENT, 'granted');
   }
 
   /** Stops recording and deletes anything not yet uploaded. */
   async optOut(): Promise<void> {
+    this.consentChoices++;
     this.consent = 'denied';
     this.queue = [];
     this.recBuffer = [];
+    if (this.early) this.early = [];
     // Forget the install id too, so a later opt-in can't be linked to earlier sessions.
-    this.anonymousId = uuid(this.random);
+    this.anonymousId = this.newId();
     if (this.session) this.session = { ...this.session, anonymousId: this.anonymousId };
     await this.storage?.removeItem(KEY_INSTALL);
     await this.storage?.setItem(KEY_CONSENT, 'denied');
@@ -229,14 +291,20 @@ export class RecapCore {
 
   /**
    * Attach your own user id (or null to clear it). Use an internal id, never an email address.
-   * Takes effect from the next upload of the current session.
+   * Signing in (null to an id) and signing out (an id to null) keep the current session, so a
+   * visit through sign-in stays one journey. A different user signing in starts a new session,
+   * so one person's session is never attributed to another.
    */
   setUserId(id: string | null): void {
     this.userId = id;
-    if (this.session) {
-      this.session = { ...this.session, userId: id };
-      this.sessions.set(this.session.id, this.session);
+    if (!this.session) return;
+    if (id !== null && this.sessionUser !== null && id !== this.sessionUser) {
+      this.restartSession(); // takes the new user id
+      return;
     }
+    if (id !== null) this.sessionUser = id;
+    this.session = { ...this.session, userId: id };
+    this.sessions.set(this.session.id, this.session);
   }
 
   /** The random install id sent with each session (see `anonymousId` in the docs). */
@@ -254,6 +322,7 @@ export class RecapCore {
     if (!name || name === this.currentScreen) return;
     const from = this.currentScreen;
     this.currentScreen = name;
+    this.screenVisit++;
     this.record('screen', { from, ...props });
     // The first screen appears without sliding in, so record it straight away.
     if (from) this.settleAfterScreenChange();
@@ -378,8 +447,8 @@ export class RecapCore {
     this.recBusy = true;
     try {
       const raw = await this.capture({ width: opt.width ?? 280, quality: opt.quality ?? 0.4, recording: true });
-      // Something private may have appeared while the picture was being taken.
-      if (!raw || this.recordingPausedFor() || this.session?.id !== sessionId) return;
+      // Something private may have appeared (or the person opted out) while the picture was taken.
+      if (!raw || this.recordingPausedFor() || !this.isRecording() || this.session?.id !== sessionId) return;
       const image = raw.startsWith('data:') ? raw : `data:image/jpeg;base64,${raw}`;
       if (image === this.recLast) return; // nothing changed on screen
       this.pushFrame(sessionId, t, image);
@@ -429,22 +498,48 @@ export class RecapCore {
 
   private maybeScreenshot(name: string): void {
     const opt = this.config?.screenshots;
-    if (!opt || !this.capture || !this.transport?.sendScreenshot || !this.isRecording()) return;
+    if (!opt || !this.capture || !this.transport?.sendScreenshot) return;
     if (typeof opt === 'object' && opt.exclude?.includes(name)) return;
     const key = `${name}|${this.device.appVersion ?? ''}`;
-    if (this.shots.has(key) || this.shooting.has(key)) return;
-    this.shooting.add(key);
+    const visit = this.screenVisit;
+    if (this.shots.has(key) || this.shooting.get(key) === visit) return;
+    if (this.screenshotBlockedFor(name, visit)) return;
+    this.shooting.set(key, visit);
     const delay = typeof opt === 'object' && opt.delayMs != null ? opt.delayMs : 1200;
-    // Wait for the screen to finish drawing, and skip it if the user has already moved on.
-    this.setTimeoutFn(() => void this.takeScreenshot(name, key), delay);
+    // Wait for the screen to finish drawing, then check again that it is still safe to take.
+    this.setTimeoutFn(() => void this.takeScreenshot(name, key, visit), delay);
   }
 
-  private async takeScreenshot(name: string, key: string): Promise<void> {
+  /**
+   * Why a screen picture can't be taken or sent right now, or null if it can. Checked when it is
+   * planned, before the picture is taken and again before it is sent.
+   */
+  private screenshotBlockedFor(name: string, visit: number): string | null {
+    if (!this.isRecording()) return 'not recording';
+    if (this.currentScreen !== name || this.screenVisit !== visit) return 'moved on';
+    if (this.backgroundedAt !== null) return 'app in background';
+    if (this.keyboardOpen) return 'keyboard open';
+    if (this.privacyHolds > 0) return 'private view on screen';
+    return null;
+  }
+
+  private async takeScreenshot(name: string, key: string, visit: number): Promise<void> {
+    // A later visit to the same screen has planned its own picture.
+    if (this.shooting.get(key) !== visit) return;
     try {
-      if (this.currentScreen !== name || !this.capture || !this.transport?.sendScreenshot) return;
-      const base64 = await this.capture();
-      if (!base64 || this.currentScreen !== name) return;
-      await this.transport.sendScreenshot({
+      // The consent choice saved on the phone may still be loading.
+      if (this.loading) await this.loading;
+      const capture = this.capture;
+      const transport = this.transport;
+      if (this.shots.has(key) || !capture || !transport?.sendScreenshot) return;
+      // Skipped pictures aren't marked as done, so a later visit can take one when it is safe.
+      const before = this.screenshotBlockedFor(name, visit);
+      if (before) return this.log(`screenshot of ${name} skipped: ${before}`);
+      const base64 = await capture();
+      if (!base64) return;
+      const after = this.screenshotBlockedFor(name, visit);
+      if (after) return this.log(`screenshot of ${name} skipped: ${after}`);
+      await transport.sendScreenshot({
         appId: this.config!.appId,
         screen: name,
         platform: this.device.platform,
@@ -459,7 +554,7 @@ export class RecapCore {
     } catch (err) {
       this.log(`screenshot of ${name} failed`, err);
     } finally {
-      this.shooting.delete(key);
+      if (this.shooting.get(key) === visit) this.shooting.delete(key);
     }
   }
 
@@ -533,9 +628,7 @@ export class RecapCore {
       this.backgroundedAt = null;
       const timeout = this.config?.sessionTimeoutMs ?? 30 * 60_000;
       if (away >= timeout) {
-        const screen = this.currentScreen;
-        this.startSession();
-        if (screen) this.screen(screen, { resumed: true });
+        this.restartSession();
       } else {
         this.record('app_state', { state: 'active', awayMs: away });
       }
@@ -612,8 +705,9 @@ export class RecapCore {
     this.currentScreen = null;
     this.scrollMax.clear();
     this.pendingLabel = null;
+    this.sessionUser = this.userId;
     this.session = {
-      id: uuid(this.random),
+      id: this.newId(),
       startedAt: new Date(this.sessionStartMs).toISOString(),
       userId: this.userId,
       anonymousId: this.anonymousId,
@@ -623,8 +717,27 @@ export class RecapCore {
     this.log(`session ${this.session.id} started${this.sampled ? '' : ' (not sampled)'}`);
   }
 
+  /** Ends the current session and starts a new one on the same screen. */
+  private restartSession(): void {
+    const screen = this.currentScreen;
+    this.startSession();
+    if (screen) this.screen(screen, { resumed: true });
+  }
+
+  private newId(): string {
+    return uuid(this.random, () => {
+      if (this.weakIdsWarned || !this.config?.debug) return;
+      this.weakIdsWarned = true;
+      console.warn(
+        '[Recap] This JavaScript engine has no crypto.randomUUID or crypto.getRandomValues, so session ' +
+          'ids fall back to Math.random, which is predictable. Install react-native-get-random-values ' +
+          "and add `import 'react-native-get-random-values';` as the first line of your app's entry file.",
+      );
+    });
+  }
+
   private record(type: RecapEventType, data: Record<string, unknown>): void {
-    if (!this.session) return;
+    if (!this.session || this.blocked) return;
     const t = this.now();
     const event: QueuedEvent = {
       sessionId: this.session.id,

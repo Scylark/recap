@@ -1,6 +1,15 @@
 // React Native bindings: <RecapProvider>, screen tracking hooks, scroll helper and press labels.
 
-import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode, type RefObject } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import {
   AppState,
   Dimensions,
@@ -183,9 +192,10 @@ export function RecapProvider({ config, children, navigationRef, device, capture
     return () => recap.setScreenCapture(null);
   }, [captureRef, config.screenshots, config.recordings]);
 
-  // Recordings pause while the keyboard is open, so nothing being typed is ever captured.
+  // Recordings and screen pictures pause while the keyboard is open, so typing isn't captured.
+  // A field that shows its value once the keyboard closes is visible unless it is in <RecapPrivate>.
   useEffect(() => {
-    if (!config.recordings) return;
+    if (!config.recordings && !config.screenshots) return;
     const show = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () =>
       recap.setKeyboardOpen(true),
     );
@@ -194,7 +204,7 @@ export function RecapProvider({ config, children, navigationRef, device, capture
       show.remove();
       hide.remove();
     };
-  }, [config.recordings]);
+  }, [config.recordings, config.screenshots]);
 
   useEffect(() => {
     void recap.init(config, detectDevice(device ?? {}));
@@ -245,7 +255,8 @@ export function RecapProvider({ config, children, navigationRef, device, capture
 }
 
 /**
- * Recording pauses while this is on screen. Wrap anything that shows personal details:
+ * Recording and screen pictures pause while this is on screen. Wrap anything that shows personal
+ * details, including form fields once they are filled in:
  *   <RecapPrivate><CheckoutForm /></RecapPrivate>
  * It renders its children unchanged.
  */
@@ -256,7 +267,8 @@ export function RecapPrivate({ children }: { children?: ReactNode }) {
 
 /** Hook form of <RecapPrivate>: recording pauses while the calling component is mounted. */
 export function useRecapPrivate(active = true): void {
-  useEffect(() => (active ? recap.holdPrivacy() : undefined), [active]);
+  // A layout effect runs before the new content is painted, so no frame can catch it first.
+  useLayoutEffect(() => (active ? recap.holdPrivacy() : undefined), [active]);
 }
 
 export function useRecap(): RecapCore {
@@ -264,8 +276,9 @@ export function useRecap(): RecapCore {
 }
 
 /**
- * Record a screen view whenever `name` changes. Handy with Expo Router:
- *   const pathname = usePathname(); useRecapScreen(pathname);
+ * Record a screen view whenever `name` changes. With Expo Router, name screens by route pattern,
+ * not by address, so ids in paths (/orders/8812) are never recorded:
+ *   const segments = useSegments(); useRecapScreen('/' + segments.join('/')); // "/orders/[id]"
  */
 export function useRecapScreen(name: string | null | undefined, props?: Record<string, unknown>): void {
   useEffect(() => {

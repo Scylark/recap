@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { RecapCore } from '../src/core';
 import type { IngestBatch, StorageAdapter, Transport } from '../src/types';
 
@@ -471,5 +471,302 @@ describe('RecapCore', () => {
     }
     await capped.shutdown();
     expect((got as { frames: unknown[] }[]).flatMap((f) => f.frames)).toHaveLength(2);
+  });
+});
+
+// ------------------------------------------------------------------ security and privacy
+
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const tick = () => new Promise((res) => setTimeout(res, 0));
+const jwt = (payload: object) =>
+  [{ alg: 'HS256', typ: 'JWT' }, payload].map((p) => Buffer.from(JSON.stringify(p)).toString('base64url')).join('.') +
+  '.signature';
+
+describe('screen pictures', () => {
+  beforeEach(() => {
+    clock = 1_700_000_000_000;
+  });
+
+  async function setup() {
+    const timers: (() => void)[] = [];
+    const shots: string[] = [];
+    const transport = { ...fakeTransport(), sendScreenshot: async (s: { screen: string }) => void shots.push(s.screen) };
+    const r = new RecapCore({ ...deps, setTimeout: (fn: () => void) => void timers.push(fn) });
+    await r.init({ appId: 'test', transport, screenshots: true }, device);
+    const hooks: { during?: () => void } = {};
+    r.setScreenCapture(async () => {
+      hooks.during?.();
+      hooks.during = undefined;
+      return 'QUJD';
+    });
+    const settle = async () => {
+      for (const t of timers.splice(0)) t();
+      await tick();
+    };
+    return { r, shots, hooks, settle };
+  }
+
+  it('skips a picture while a private view, the keyboard or the background starts during its delay', async () => {
+    const { r, shots, hooks, settle } = await setup();
+
+    r.screen('Profile');
+    const release = r.holdPrivacy(); // a <RecapPrivate> mounts during the delay
+    await settle();
+    release();
+
+    r.screen('Search');
+    r.setKeyboardOpen(true);
+    await settle();
+    r.setKeyboardOpen(false);
+
+    r.screen('Feed');
+    r.appState('background');
+    await settle();
+    r.appState('active');
+
+    r.screen('Chat');
+    let releaseChat = () => {};
+    hooks.during = () => (releaseChat = r.holdPrivacy()); // appears while the picture is taken
+    await settle();
+    releaseChat();
+
+    expect(shots).toEqual([]);
+
+    // None was marked as done, so the next visit to each screen takes its picture.
+    for (const name of ['Profile', 'Search', 'Feed', 'Chat']) {
+      r.screen(name);
+      await settle();
+    }
+    expect(shots).toEqual(['Profile', 'Search', 'Feed', 'Chat']);
+  });
+
+  it('takes no picture after an opt-out during its delay or while it is taken', async () => {
+    const { r, shots, hooks, settle } = await setup();
+    r.screen('Home');
+    await r.optOut();
+    await settle();
+
+    await r.optIn();
+    r.screen('Basket');
+    hooks.during = () => void r.optOut();
+    await settle();
+    expect(shots).toEqual([]);
+  });
+
+  it('waits for the saved consent choice before taking a picture', async () => {
+    const storage = memoryStorage();
+    storage.data.set('recap:consent', 'denied');
+    let release!: () => void;
+    const gate = new Promise<void>((res) => (release = res));
+    const slow: StorageAdapter = { ...storage, getItem: async (k) => (await gate, storage.getItem(k)) };
+    const timers: (() => void)[] = [];
+    const shots: string[] = [];
+    const transport = { ...fakeTransport(), sendScreenshot: async (s: { screen: string }) => void shots.push(s.screen) };
+    const r = new RecapCore({ ...deps, setTimeout: (fn: () => void) => void timers.push(fn) });
+    const ready = r.init({ appId: 'test', transport, storage: slow, screenshots: true }, device);
+    r.setScreenCapture(async () => 'QUJD');
+    r.screen('Home'); // drawn before storage answers
+    for (const t of timers.splice(0)) t(); // the delay ends first
+    release();
+    await ready;
+    await tick();
+    expect(shots).toEqual([]);
+  });
+});
+
+describe('secret keys', () => {
+  it('refuses a service_role or sb_secret_ key: records and sends nothing, and always says why', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => (calls.push(url), { ok: true, status: 200 }));
+    try {
+      const url = 'https://p.supabase.co';
+      for (const anonKey of [jwt({ iss: 'supabase', role: 'service_role' }), 'sb_secret_abc123']) {
+        const r = new RecapCore(deps);
+        await r.init({ appId: 'test', supabase: { url, anonKey } }, device);
+        r.screen('Home');
+        r.track('signed_up');
+        await r.flush();
+        expect(r.isRecording()).toBe(false);
+        expect(r.pending()).toHaveLength(0);
+      }
+      // A secret key in a custom endpoint's headers is refused too.
+      const viaEndpoint = new RecapCore(deps);
+      await viaEndpoint.init(
+        { appId: 'test', endpoint: { url, headers: { Authorization: `Bearer ${jwt({ role: 'service_role' })}` } } },
+        device,
+      );
+      viaEndpoint.screen('Home');
+      await viaEndpoint.flush();
+      // And a transport built by hand.
+      const { supabaseTransport } = await import('../src/transports');
+      const batch = { appId: 'a', sdkVersion: '0', session: { id: 'x', startedAt: '', userId: null, device: {} as never }, events: [] };
+      await expect(supabaseTransport({ url, anonKey: 'sb_secret_abc123' }).send(batch)).rejects.toThrow(/secret/);
+      expect(calls).toEqual([]);
+      expect(errors).toHaveBeenCalledTimes(4); // debug is off
+      expect(String(errors.mock.calls[0]![0])).toMatch(/service_role.*anon or publishable key/s);
+      expect(String(errors.mock.calls[1]![0])).toMatch(/sb_secret_/);
+
+      // Public keys still work: a legacy anon JWT and a publishable key.
+      for (const anonKey of [jwt({ iss: 'supabase', role: 'anon' }), 'sb_publishable_abc']) {
+        const ok = new RecapCore(deps);
+        await ok.init({ appId: 'test', supabase: { url, anonKey } }, device);
+        ok.screen('Home');
+        await ok.flush();
+      }
+      expect(calls).toHaveLength(2);
+      expect(errors).toHaveBeenCalledTimes(4);
+    } finally {
+      errors.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('session ids', () => {
+  it('uses crypto.getRandomValues when randomUUID is missing (Hermes), never Math.random', async () => {
+    let calls = 0;
+    vi.stubGlobal('crypto', {
+      getRandomValues: (b: Uint8Array) => {
+        calls++;
+        for (let i = 0; i < b.length; i++) b[i] = (i * 37 + calls * 101) & 0xff;
+        return b;
+      },
+    });
+    try {
+      const r = new RecapCore(deps); // deps.random always returns 0.42
+      await r.init({ appId: 'test', transport: fakeTransport() }, device);
+      const session = r.getSessionId()!;
+      expect(session).toMatch(UUID_V4);
+      expect(r.getAnonymousId()).toMatch(UUID_V4);
+      expect(r.getAnonymousId()).not.toBe(session);
+      expect(calls).toBe(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('falls back to Math.random only without crypto, with a debug warning', async () => {
+    vi.stubGlobal('crypto', undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const quiet = new RecapCore(deps);
+      await quiet.init({ appId: 'test' }, device);
+      expect(quiet.getSessionId()).toMatch(UUID_V4);
+      expect(warn).not.toHaveBeenCalled();
+
+      const loud = new RecapCore(deps);
+      await loud.init({ appId: 'test', debug: true }, device);
+      expect(warn).toHaveBeenCalledTimes(1); // once, though two ids were made
+      expect(String(warn.mock.calls[0]![0])).toMatch(/react-native-get-random-values/);
+    } finally {
+      warn.mockRestore();
+      log.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('sessions, consent and users', () => {
+  beforeEach(() => {
+    clock = 1_700_000_000_000;
+  });
+
+  it('starts a new session when someone opts back in after opting out', async () => {
+    const transport = fakeTransport();
+    const r = new RecapCore(deps);
+    await r.init({ appId: 'test', transport }, device);
+    r.screen('Home');
+    await r.flush();
+    const first = r.getSessionId();
+    await r.optOut();
+    r.tap({ x: 1, y: 1 });
+    await r.optIn();
+    expect(r.getSessionId()).not.toBe(first);
+    r.screen('Settings');
+    await r.flush();
+    const events = (id: string | null) => transport.batches.filter((b) => b.session.id === id).flatMap((b) => b.events);
+    expect(events(first).map((e) => e.screen)).toEqual(['Home']);
+    expect(events(r.getSessionId()).map((e) => [e.type, e.screen])).toEqual([
+      ['screen', 'Home'],
+      ['screen', 'Settings'],
+    ]);
+  });
+
+  it('keeps one session through sign-in and sign-out, but never shares one between users', async () => {
+    const transport = fakeTransport();
+    const r = new RecapCore(deps);
+    await r.init({ appId: 'test', transport }, device);
+    r.screen('Home');
+    const visitor = r.getSessionId();
+    r.setUserId('u1'); // sign-in
+    expect(r.getSessionId()).toBe(visitor);
+    r.track('a');
+    r.setUserId('u2'); // a different user
+    const second = r.getSessionId();
+    expect(second).not.toBe(visitor);
+    r.track('b');
+    r.setUserId(null); // sign-out
+    expect(r.getSessionId()).toBe(second);
+    r.setUserId('u2'); // the same person signs back in
+    expect(r.getSessionId()).toBe(second);
+    r.setUserId(null);
+    r.setUserId('u3'); // someone else signs in after a sign-out
+    expect(r.getSessionId()).not.toBe(second);
+    await r.flush();
+
+    const of = (id: string | null) => transport.batches.filter((b) => b.session.id === id);
+    expect(of(visitor).map((b) => b.session.userId)).toEqual(['u1']);
+    expect(of(visitor).flatMap((b) => b.events).map((e) => e.data.name ?? e.type)).toEqual(['screen', 'a']);
+    expect(of(second).flatMap((b) => b.events).map((e) => e.data.name ?? e.type)).toEqual(['screen', 'b']);
+    expect(of(r.getSessionId())[0]!.session.userId).toBe('u3');
+  });
+
+  it("doesn't let saved settings undo an opt-out made while they load", async () => {
+    const storage = memoryStorage();
+    storage.data.set('recap:consent', 'granted');
+    storage.data.set('recap:install', 'old-install-id');
+    let release!: () => void;
+    const gate = new Promise<void>((res) => (release = res));
+    // Reads are already on their way when the opt-out saves, so they return what was there before.
+    const slow: StorageAdapter = {
+      ...storage,
+      getItem: async (k) => {
+        const value = await storage.getItem(k);
+        await gate;
+        return value;
+      },
+    };
+    const transport = fakeTransport();
+    const r = new RecapCore(deps);
+    const ready = r.init({ appId: 'test', transport, storage: slow }, device);
+    r.screen('Home');
+    const out = r.optOut(); // e.g. the app applies its own "no analytics" setting at start-up
+    release();
+    await Promise.all([ready, out]);
+    r.screen('Next');
+    await r.flush();
+    expect(r.isRecording()).toBe(false);
+    expect(transport.batches).toHaveLength(0);
+    expect(r.getAnonymousId()).not.toBe('old-install-id');
+  });
+
+  it('drops a recording frame when the person opts out while it is being taken', async () => {
+    const frames: (string | null)[] = [];
+    const transport = {
+      ...fakeTransport(),
+      sendFrames: async (f: { frames: { image: string | null }[] }) => void frames.push(...f.frames.map((x) => x.image)),
+    };
+    const r = new RecapCore(deps);
+    await r.init({ appId: 'test', transport, recordings: true }, device);
+    r.screen('Home');
+    await r.flush();
+    r.setScreenCapture(async () => (await r.optOut(), 'SECRET'));
+    clock += 1000;
+    await r.recordFrame();
+    await r.optIn();
+    await r.shutdown();
+    expect(frames).not.toContain('data:image/jpeg;base64,SECRET');
   });
 });
