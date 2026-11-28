@@ -88,40 +88,6 @@ visit in five. Recap loads its recorder (`recap-rrweb.min.js`, next to `recap.mi
 visits. Add `data-record-canvas="true"` if your pages draw charts on a canvas. In the dashboard's session
 list, recorded visits are marked and listed first.
 
-### Heatmaps on a website
-
-The dashboard's **Heatmaps** page draws a web page at its full length and puts each tap where it landed
-on the page, for phones, tablets and desktops separately (their layouts differ, so one map for all of
-them would mean nothing). What makes the maps good:
-
-- **Turn on recordings.** The page behind the taps is the newest recorded visit of that page at that
-  window size. Without one, the taps are drawn on a blank page. If the newest visit is an odd one (a menu
-  open, signed out), **Try another recording** draws the next.
-- **Name your key buttons** with `data-ut-label="Start trial"` (or give them an `id`). Most tapped then
-  lists them by that name, and the same name in every visit groups their taps even when the layout moves.
-- **Let the window scroll.** Scroll depth and page positions come from the window. A page that scrolls
-  inside its own container (a full-height `<div>` with `overflow: auto`) reports every tap and scroll as
-  if it were at the top.
-- **Bars that stay on screen** (a fixed header, a bottom tab bar) are found on the recorded page and
-  their taps drawn on them, at the top or bottom of the map.
-
-How to read it:
-
-- **The fold** is the bottom of a typical window at that size when the page opens. **Taps above the fold**
-  counts the taps made without scrolling.
-- **How far down**: the share of visits that scrolled 25%, 50%, 75% of the way and to the end. Each line
-  on the map is where the bottom of the window was at that depth.
-- **Rage taps**: three or more quick taps on one spot in one visit, usually something that didn't respond.
-- **Dead taps**: taps on something that isn't a link, button or form field and has no `data-ut-label`.
-  People expected it to do something: a price, a card, a picture.
-- **Which visits**: compare the visits that sent one of your events (`Recap.track('signed_up')`) with
-  the visits that didn't.
-- Under 30 visits the page says so: a pattern that small can be chance.
-
-Limits: a map reads the newest 5,000 taps on a screen in the period. Charts drawn on a `<canvas>` show
-blank on the map (they replay fine in a session). Pages that change a lot from visit to visit (a feed, a
-basket) are drawn as the recorded visit saw them, so taps from other visits can land on different items.
-
 ## 5. Check it works (5 min)
 
 1. Open any page with `?recap=on` added to the address. That counts this tab even off your listed hosts
