@@ -114,6 +114,17 @@ table.clickable tbody tr:hover { background: var(--accent-soft); }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); font-size: 12px; }
 .pill.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.kind-col { width: 52px; padding-right: 0; }
+.session-kind { display: inline-flex; gap: 6px; align-items: center; vertical-align: middle; }
+.session-kind svg, .legend svg { display: block; }
+.kind-icon { color: var(--muted); }
+.rec-icon { color: var(--accent); display: inline-flex; width: 16px; }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin: -4px 0 12px; }
+.legend > span { display: inline-flex; gap: 6px; align-items: center; }
+.legend .rec-icon { width: auto; }
+.recordings-line { margin: 14px 0 6px; }
+
 .filters, .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .row.space { justify-content: space-between; align-items: flex-start; }
 .pager { display: flex; gap: 12px; align-items: center; justify-content: center; margin-top: 12px; }

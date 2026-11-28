@@ -47,6 +47,9 @@ export function Storage({ isAdmin, me }: { isAdmin: boolean; me: string }) {
   const used = u ? u.recapBytes / (1024 * 1024) : 0;
   const share = cap ? Math.min(1, used / cap) : u ? Math.min(1, u.databaseBytes / (FREE_PLAN_MB * 1024 * 1024)) : 0;
   const full = cap != null && used >= cap;
+  const recCap = settings.data.max_replay_mb ?? null;
+  const recUsed = u?.recordingsBytes != null ? u.recordingsBytes / (1024 * 1024) : null;
+  const recFull = recCap != null && recUsed != null && recUsed >= recCap;
   const set = (k: keyof Form) => (e: { target: { value: string } }) => form && setForm({ ...form, [k]: e.target.value });
 
   async function save(e: FormEvent) {
@@ -113,6 +116,27 @@ export function Storage({ isAdmin, me }: { isAdmin: boolean; me: string }) {
         >
           <span style={{ width: `${Math.max(1, share * 100)}%` }} />
         </div>
+        {u && recUsed != null && (
+          <div className="row space recordings-line">
+            <span className="small">
+              Recordings {mb(u.recordingsBytes ?? 0)}
+              {recCap != null ? ` of your ${recCap} MB recordings limit` : ' (no recordings limit)'}
+            </span>
+            {recFull && <span className="pill warn">Recordings limit reached: new visits are counted but not recorded</span>}
+          </div>
+        )}
+        {u && recCap != null && recUsed != null && (
+          <div
+            className={`meter${recFull ? ' full' : recUsed / recCap > 0.8 ? ' high' : ''}`}
+            role="meter"
+            aria-label="Recordings storage used"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(Math.min(1, recUsed / recCap) * 100)}
+          >
+            <span style={{ width: `${Math.max(1, Math.min(1, recUsed / recCap) * 100)}%` }} />
+          </div>
+        )}
         {u && (
           <p className="muted small">
             {u.sessions.toLocaleString()} sessions ({u.sessionsToday.toLocaleString()} today),{' '}
@@ -158,6 +182,32 @@ export function Storage({ isAdmin, me }: { isAdmin: boolean; me: string }) {
               </span>
               <small>A replay stops after this long. The rest of the session is still saved.</small>
             </label>
+            {form.recordingLimits ? (
+              <>
+                <label>
+                  <span>Recordings stop at</span>
+                  <span className="unit">
+                    <input inputMode="numeric" placeholder="No limit" value={form.recordingsMb} onChange={set('recordingsMb')} /> MB
+                  </span>
+                  <small>
+                    Once all recordings together reach this size, new visits are still counted but not recorded. A visit
+                    already being recorded carries on. Keep it below the overall limit. Leave blank for no limit.
+                  </small>
+                </label>
+                <label>
+                  <span>Recording per visit</span>
+                  <span className="unit">
+                    <input inputMode="numeric" value={form.visitMb} onChange={set('visitMb')} /> MB
+                  </span>
+                  <small>One visit's recording stops at this size. The rest of the visit is still counted.</small>
+                </label>
+              </>
+            ) : (
+              <p className="muted small">
+                To limit recordings separately from the rest of Recap's data, run <code>supabase/setup.sql</code> again
+                in the Supabase SQL editor, then refresh this page.
+              </p>
+            )}
             <label>
               <span>New sessions a day</span>
               <input inputMode="numeric" placeholder="No limit" value={form.dailySessions} onChange={set('dailySessions')} />

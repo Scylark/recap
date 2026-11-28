@@ -90,8 +90,7 @@ logs an error and sends nothing.
   data-supabase-key="sb_publishable_…"
   data-hosts="example.com,*.example.com"
   data-exclude-paths="/account,/admin"
-  data-recordings="true"
-  data-record-sample="0.2"></script>
+  data-recordings="true"></script>
 ```
 
 With that tag Recap:
@@ -102,7 +101,9 @@ With that tag Recap:
 - labels taps only from `aria-label`, `title`, `alt` and similar, never from on-screen text;
 - captures nothing when the browser sends [Global Privacy Control](https://globalprivacycontrol.org/);
 - does nothing inside an iframe, so a page embedded on another site isn't counted;
-- records one tab in five for replay, with every form field masked. Only those tabs load the recorder.
+- records every visit for replay, with every form field masked, until recordings reach their limit on the
+  dashboard's Storage page (300 MB in all and 10 MB per visit to start; visits are still counted after that).
+  On a busy site, add `data-record-sample="0.2"` to record one tab in five; only recorded tabs load the recorder.
 
 **3. Mark what's private** with the one privacy marker:
 
@@ -226,7 +227,7 @@ Recap.init({
   supabase: { url: 'https://your-project.supabase.co', anonKey: 'sb_publishable_…' },
   hosts: ['example.com', '*.example.com'],
   excludePaths: ['/account', /^\/orders\/\d+/],
-  recordings: { record, sampleRate: 0.2 },
+  recordings: { record }, // every visit; add sampleRate: 0.2 to record one tab in five
   screenName: (path) => path.replace(/\.html$/, ''),
 });
 Recap.track('signed_up', { plan: 'pro' }); // custom events for funnels

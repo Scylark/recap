@@ -26,27 +26,43 @@ export interface SessionFilter {
   platform?: string;
   userId?: string;
   screen?: string;
+  /** 'recordings' puts sessions with a recording first, newest first within each group. Default 'newest'. */
+  order?: 'recordings' | 'newest';
+  /** Only sessions with ('with') or without ('without') a recording. */
+  recording?: 'with' | 'without';
   limit?: number;
   offset?: number;
 }
 
-export async function listSessions(f: SessionFilter): Promise<{ rows: SessionRow[]; total: number }> {
-  let q = db()
-    .from('recap_sessions')
-    .select('*', { count: 'exact' })
-    .eq('app_id', f.appId)
-    .gte('started_at', f.since)
-    .order('started_at', { ascending: false })
-    .range(f.offset ?? 0, (f.offset ?? 0) + (f.limit ?? 50) - 1);
-  if (f.platform) q = q.eq('platform', f.platform);
-  if (f.userId) q = q.ilike('user_id', `%${f.userId}%`);
-  if (f.screen) {
-    const v = `"${f.screen.replace(/"/g, '\\"')}"`;
-    q = q.or(`first_screen.eq.${v},last_screen.eq.${v}`);
+export interface SessionPage {
+  rows: SessionRow[];
+  total: number;
+  /** False on databases without the recording limits migration: they can't tell which sessions are recorded. */
+  recordingKnown: boolean;
+}
+
+export async function listSessions(f: SessionFilter): Promise<SessionPage> {
+  const run = (withRecording: boolean) => {
+    let q = db().from('recap_sessions').select('*', { count: 'exact' }).eq('app_id', f.appId).gte('started_at', f.since);
+    if (withRecording && f.order === 'recordings') q = q.order('has_recording', { ascending: false });
+    q = q.order('started_at', { ascending: false }).range(f.offset ?? 0, (f.offset ?? 0) + (f.limit ?? 50) - 1);
+    if (withRecording && f.recording) q = q.eq('has_recording', f.recording === 'with');
+    if (f.platform) q = q.eq('platform', f.platform);
+    if (f.userId) q = q.ilike('user_id', `%${f.userId}%`);
+    if (f.screen) {
+      const v = `"${f.screen.replace(/"/g, '\\"')}"`;
+      q = q.or(`first_screen.eq.${v},last_screen.eq.${v}`);
+    }
+    return q;
+  };
+  let recordingKnown = true;
+  let res = await run(true);
+  if (res.error && /has_recording|42703/.test(`${res.error.message} ${(res.error as { code?: string }).code ?? ''}`)) {
+    recordingKnown = false;
+    res = await run(false);
   }
-  const res = await q;
   if (res.error) throw new Error(res.error.message);
-  return { rows: (res.data ?? []) as SessionRow[], total: res.count ?? 0 };
+  return { rows: (res.data ?? []) as SessionRow[], total: res.count ?? 0, recordingKnown };
 }
 
 export async function getSession(id: string): Promise<SessionRow | null> {
@@ -284,6 +300,10 @@ export interface StorageSettings {
   max_frames: number;
   daily_sessions: number | null;
   max_db_mb: number | null;
+  /** New recordings stop once all recordings reach this size. Missing before the recording limits migration. */
+  max_replay_mb?: number | null;
+  /** Most recording kept for one visit, in MB. Missing before the recording limits migration. */
+  max_visit_replay_mb?: number;
   last_purge_at: string | null;
   updated_at: string;
   updated_by: string | null;
@@ -292,6 +312,8 @@ export interface StorageSettings {
 export interface StorageUsage {
   databaseBytes: number;
   recapBytes: number;
+  /** All recordings (app replays and web page recordings). Missing before the recording limits migration. */
+  recordingsBytes?: number;
   sessionsBytes: number;
   eventsBytes: number;
   framesBytes: number;
@@ -316,7 +338,7 @@ export async function getStorageSettings(): Promise<StorageSettings | null> {
 
 export type StorageSettingsInput = Pick<
   StorageSettings,
-  'keep_days' | 'session_sample' | 'replay_sample' | 'max_frames' | 'daily_sessions' | 'max_db_mb'
+  'keep_days' | 'session_sample' | 'replay_sample' | 'max_frames' | 'daily_sessions' | 'max_db_mb' | 'max_replay_mb' | 'max_visit_replay_mb'
 >;
 
 export async function saveStorageSettings(s: StorageSettingsInput, by: string): Promise<void> {

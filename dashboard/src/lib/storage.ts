@@ -14,6 +14,10 @@ export interface Form {
   replayMinutes: string;
   dailySessions: string; // '' = no limit
   maxMb: string; // '' = no limit
+  /** False on databases without the recording limits migration: the two fields below are left out. */
+  recordingLimits: boolean;
+  recordingsMb: string; // '' = no limit
+  visitMb: string;
 }
 
 export function toForm(s: StorageSettings): Form {
@@ -24,6 +28,9 @@ export function toForm(s: StorageSettings): Form {
     replayMinutes: String(Math.round((s.max_frames / 60) * 10) / 10),
     dailySessions: s.daily_sessions == null ? '' : String(s.daily_sessions),
     maxMb: s.max_db_mb == null ? '' : String(s.max_db_mb),
+    recordingLimits: s.max_visit_replay_mb !== undefined,
+    recordingsMb: s.max_replay_mb == null ? '' : String(s.max_replay_mb),
+    visitMb: String(s.max_visit_replay_mb ?? 10),
   };
 }
 
@@ -43,7 +50,7 @@ export function fromForm(f: Form): StorageSettingsInput | string {
   if (daily != null && (!Number.isInteger(daily) || daily < 0)) return 'New sessions a day must be a whole number, or blank for no limit.';
   const maxMb = f.maxMb.trim() === '' ? null : Number(f.maxMb);
   if (maxMb != null && (!Number.isInteger(maxMb) || maxMb < 50)) return 'The size limit must be at least 50 MB, or blank for no limit.';
-  return {
+  const out: StorageSettingsInput = {
     keep_days: f.keepDays === '' ? null : Number(f.keepDays),
     session_sample: session,
     replay_sample: replay,
@@ -51,4 +58,13 @@ export function fromForm(f: Form): StorageSettingsInput | string {
     daily_sessions: daily,
     max_db_mb: maxMb,
   };
+  if (!f.recordingLimits) return out;
+  const recMb = f.recordingsMb.trim() === '' ? null : Number(f.recordingsMb);
+  if (recMb != null && (!Number.isInteger(recMb) || recMb < 1)) return 'The recordings limit must be a whole number of MB, or blank for no limit.';
+  if (recMb != null && maxMb != null && recMb >= maxMb) {
+    return `The recordings limit must be below the overall limit (${maxMb} MB), so visits keep being counted after recordings stop.`;
+  }
+  const visit = Number(f.visitMb);
+  if (f.visitMb.trim() === '' || !Number.isInteger(visit) || visit < 1 || visit > 500) return 'Recording per visit must be a whole number from 1 to 500 MB.';
+  return { ...out, max_replay_mb: recMb, max_visit_replay_mb: visit };
 }

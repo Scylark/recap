@@ -68,10 +68,11 @@ The anon key is designed to be public and is safe to ship in the app: with Recap
 the `recap_ingest` function and cannot read any data. **Never** put the `service_role` key in the app or
 the dashboard.
 
-Storage limits come with the migrations: data older than 90 days is deleted automatically, and new
-sessions pause if Recap's data reaches 400 MB (Supabase's free plan allows 500 MB). An admin can change
-both, and the share of sessions and replays kept, on the dashboard's **Storage** page. These limits are
-enforced in the database, so they apply to every app without an app update.
+Storage limits come with the migrations: data older than 90 days is deleted automatically, new
+recordings stop once recordings reach 300 MB (visits are still counted), each visit's recording stops at
+10 MB, and new sessions pause if Recap's data reaches 400 MB (Supabase's free plan allows 500 MB). An
+admin can change all of these, and the share of sessions and replays kept, on the dashboard's **Storage**
+page. These limits are enforced in the database, so they apply to every app without an app update.
 
 ## Step 2. Install the SDK
 
@@ -177,7 +178,7 @@ without them, using the screen pictures above. For true recordings, add `recordi
 ```tsx
 import { RecapPrivate } from '@recap-ux/react-native';
 
-config={{ ...config, recordings: { sampleRate: 0.1, exclude: ['Account'] } }}
+config={{ ...config, recordings: { exclude: ['Account'] } }}
 
 // Wrap anything showing personal details. Recording pauses while it is on screen.
 <RecapPrivate><CheckoutForm /></RecapPrivate>
@@ -189,9 +190,10 @@ open, on `exclude` screens and while any `<RecapPrivate>` is mounted; those mome
 privacy" in the replay. Before turning it on in production:
 - **Ask** the owner, and find every screen that shows names, addresses, payment details, messages or
   health data. Wrap those in `<RecapPrivate>` or list them in `exclude`.
-- Use `sampleRate` (e.g. `0.1`) on busy apps: Supabase's free database is 500 MB, and a ten-minute
-  recording is a few MB. The dashboard's Storage page can also keep replays for only a share of
-  sessions, and deletes old data automatically.
+- Every session is recorded by default. Supabase's free database is 500 MB and a ten-minute recording is
+  a few MB, so the database stops new recordings at 300 MB in all and 10 MB per session (visits are still
+  counted), and deletes old data automatically. The owner changes these on the dashboard's Storage page.
+  On a busy app, add `sampleRate` (e.g. `0.2`) to record only a share of sessions.
 - Update the privacy policy and store disclosures (see docs/mobile-privacy.md).
 - Check how the app shows menus, pickers and bottom sheets. A React Native `<Modal>` (and libraries
   built on it) opens a separate native window that recordings can't see, so the replay shows the page
@@ -301,8 +303,7 @@ option table.
      data-supabase-key="sb_publishable_…"
      data-hosts="example.com,*.example.com"
      data-exclude-paths="/account,/admin"
-     data-recordings="true"
-     data-record-sample="0.2"></script>
+     data-recordings="true"></script>
    ```
    With a bundler: `npm install recap-ux` (it brings `rrweb@2.2.2`) and call, once at start-up,
    `Recap.init({ appId, supabase: { url, anonKey }, hosts, excludePaths, recordings: { record, sampleRate } })`
@@ -346,7 +347,7 @@ If the site sets a Content-Security-Policy, `script-src` must allow the folder `
 | `endpoint` | | `{ url, headers? }` to POST JSON batches to the owner's own API instead |
 | `transport` | | Custom `{ send(batch) }` for anything else |
 | `storage` | memory only | AsyncStorage, MMKV or similar; keeps the queue across restarts |
-| `sampleRate` | `1` | Share of sessions recorded, e.g. `0.2` for 20% on very busy apps |
+| `sampleRate` | `1` | Share of sessions sent, e.g. `0.2` for 20% on very busy apps |
 | `requireConsent` | `false` | Record nothing until `recap.optIn()` |
 | `flushIntervalMs` | `10000` | Upload interval |
 | `maxBatchSize` | `50` | Events per request |
@@ -381,7 +382,8 @@ that) or build your own views.
 - What is and isn't tested yet: `docs/testing.md`
 - Hands-on trial on a phone (for people, not agents): `docs/try-it-on-your-phone.md`
 - Database checks against a scratch Postgres: run `supabase/tests/supabase-shim.sql`, then every file in
-  `supabase/migrations/` in order, then `supabase/tests/security.sql`, `supabase/tests/analytics-and-screens.sql` and `supabase/tests/recordings.sql`.
+  `supabase/migrations/` in order, then `security.sql`, `analytics-and-screens.sql`, `recordings.sql`, `dom.sql`,
+  `storage-limits.sql`, `dom-limits.sql` and `recording-limits.sql` from `supabase/tests/`, in that order.
 - Analytics parity (database functions vs the demo's copies):
   `cd dashboard && RECAP_TEST_PG=postgres://... TZ=UTC npx vitest run tests/analytics-parity.test.ts` on a scratch database.
 - The web library in `src/` has its own tests: `npm install && npm test` at the root.

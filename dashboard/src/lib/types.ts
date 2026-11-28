@@ -19,6 +19,11 @@ export interface SessionRow {
   screen_count: number;
   first_screen: string | null;
   last_screen: string | null;
+  /** Bytes of app replay pictures and web page recording. Missing before the storage and recording limits migrations. */
+  replay_bytes?: number;
+  dom_bytes?: number;
+  /** True when the session has a recording (app replay pictures or a web page recording). */
+  has_recording?: boolean;
 }
 
 export type EventType = 'screen' | 'tap' | 'scroll' | 'app_state' | 'custom';

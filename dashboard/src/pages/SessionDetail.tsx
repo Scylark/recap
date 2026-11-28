@@ -147,9 +147,10 @@ function Detail({
       <h3>Replay</h3>
       {session.platform === 'web' && dom.data && dom.data.events.length <= 1 && (
         <p className="muted small" data-testid="web-not-recorded">
-          This visit wasn't picked for a page recording: websites record only the share of visits set by
-          <code> recordings.sampleRate</code> (or <code>data-record-sample</code>). Its screens and taps are below. To
-          record your own visit, open the site with <code>?recap=record</code>.
+          This visit has no page recording. Either it wasn't picked (the site records only the share of visits set by
+          <code> recordings.sampleRate</code> or <code>data-record-sample</code>), or recordings had reached their limit
+          on the <a href="#/storage">Storage</a> page. Its screens and taps are below. To record your own visit, open the
+          site with <code>?recap=record</code>.
         </p>
       )}
       {dom.data && dom.data.events.length > 1 ? (

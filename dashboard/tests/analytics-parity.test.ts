@@ -54,7 +54,8 @@ describe.skipIf(!url)('analytics: database and demo agree', () => {
       "insert into public.recap_members (email, role) values ('parity@example.com', 'viewer') on conflict do nothing",
     );
     for (const s of data.sessions) {
-      const cols = Object.keys(s);
+      // has_recording is worked out by the database (a generated column), so it can't be inserted.
+      const cols = Object.keys(s).filter((c) => c !== 'has_recording');
       await client.query(
         `insert into public.recap_sessions (${cols.join(',')}) values (${cols.map((_, i) => `$${i + 1}`).join(',')})`,
         cols.map((c) => (s as unknown as Record<string, unknown>)[c] ?? null),

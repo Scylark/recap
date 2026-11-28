@@ -141,13 +141,14 @@ function demoUsage() {
   return {
     databaseBytes: recapBytes + 12 * 1024 * 1024,
     recapBytes,
+    recordingsBytes: frameBytes,
     sessionsBytes,
     eventsBytes,
     framesBytes: frameBytes,
     screenshotsBytes: shotBytes,
     sessions: data.sessions.length,
     sessionsToday: data.sessions.filter((s) => s.started_at.slice(0, 10) === today).length,
-    sessionsWithReplay: new Set(data.frames.map((f) => (f as { session_id: string }).session_id)).size,
+    sessionsWithReplay: data.sessions.filter((s) => s.has_recording).length,
     oldestSession: data.sessions.reduce<string | null>((m, s) => (m == null || s.started_at < m ? s.started_at : m), null),
   };
 }

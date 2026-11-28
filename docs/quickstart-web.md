@@ -35,8 +35,9 @@ free Vercel or Netlify account for the dashboard. No build step, no npm.
    insert into public.recap_members (email, role) values ('you@example.com', 'admin');
    ```
 
-Defaults: data older than 90 days is deleted, and new sessions pause at 400 MB (the free plan allows
-500 MB). Change both later on the dashboard's **Storage** page.
+Defaults: data older than 90 days is deleted, new recordings stop at 300 MB in all and 10 MB per visit
+(visits are still counted), and new sessions pause at 400 MB (the free plan allows 500 MB). Change them
+later on the dashboard's **Storage** page.
 
 ## 3. Put the dashboard online (7 min)
 
@@ -76,9 +77,11 @@ browsers that send Global Privacy Control are not counted.
 **Hide parts of a page:** add `class="recap-private"` (or `data-recap-private`) to anything that must never
 be counted or recorded.
 
-**Screen replays (optional):** add `data-recordings="true"` and `data-record-sample="0.1"` to record one
-visit in ten. Recap loads its recorder (`recap-rrweb.min.js`, next to `recap.min.js`) only for recorded
-visits. Add `data-record-canvas="true"` if your pages draw charts on a canvas.
+**Screen replays (optional):** add `data-recordings="true"` to record every visit, until recordings reach
+the limits on the Storage page (step 2). On a busy site, add `data-record-sample="0.2"` to record one
+visit in five. Recap loads its recorder (`recap-rrweb.min.js`, next to `recap.min.js`) only for recorded
+visits. Add `data-record-canvas="true"` if your pages draw charts on a canvas. In the dashboard's session
+list, recorded visits are marked and listed first.
 
 ## 5. Check it works (5 min)
 

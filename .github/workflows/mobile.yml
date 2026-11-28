@@ -55,13 +55,14 @@ jobs:
           PGDATABASE=setup_check psql -v ON_ERROR_STOP=1 -f supabase/tests/supabase-shim.sql
           PGDATABASE=setup_check psql -v ON_ERROR_STOP=1 -f supabase/setup.sql
           PGDATABASE=setup_check psql -v ON_ERROR_STOP=1 -f supabase/setup.sql
-          PGDATABASE=setup_check psql -v ON_ERROR_STOP=1 -tAc "select count(distinct p.proname) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname like 'recap\_%'" | grep -qx 25
+          PGDATABASE=setup_check psql -v ON_ERROR_STOP=1 -tAc "select count(distinct p.proname) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname like 'recap\_%'" | grep -qx 27
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/security.sql
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/analytics-and-screens.sql
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/recordings.sql
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/dom.sql
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/storage-limits.sql
       - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/dom-limits.sql
+      - run: psql -v ON_ERROR_STOP=1 -f supabase/tests/recording-limits.sql
       - uses: actions/setup-node@v7
         with: { node-version: 22 }
       - name: Analytics in the database match the demo's numbers

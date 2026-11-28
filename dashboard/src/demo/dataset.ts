@@ -22,7 +22,7 @@ export interface FrameRow {
   image: string | null;
 }
 
-/** Stand-in recordings for the sample app: a frame per screen and per press, with checkout hidden for privacy. */
+/** Stand-in recordings for two in three of the sample app's sessions: a frame per screen and per press, with checkout hidden for privacy. */
 function demoFrames(sessions: SessionRow[], events: EventRow[]): FrameRow[] {
   const out: FrameRow[] = [];
   const cache = new Map<string, string>();
@@ -33,8 +33,11 @@ function demoFrames(sessions: SessionRow[], events: EventRow[]): FrameRow[] {
   };
   const bySession = new Map<string, EventRow[]>();
   for (const e of events) (bySession.get(e.session_id) ?? bySession.set(e.session_id, []).get(e.session_id)!).push(e);
+  let n = 0;
   for (const s of sessions) {
     if (s.app_id !== 'demo-shop') continue;
+    // Every third session has no recording, as on a site that samples or has hit its recordings limit.
+    if (n++ % 3 === 2) continue;
     let last: string | null | undefined;
     const add = (t: number, image: string | null) => {
       if (image === last) return;
@@ -213,17 +216,26 @@ export function buildDataset(now = Date.now()): Dataset {
   const lastReal = Math.max(...real.sessions.map((s) => Date.parse(s.last_seen_at)));
   const shift = now - 2 * 86_400_000 - lastReal;
   const move = (iso: string) => new Date(Date.parse(iso) + shift).toISOString();
+  const frames = demoFrames(g.sessions, g.events);
+  const replayBytes = new Map<string, number>();
+  for (const f of frames) replayBytes.set(f.session_id, (replayBytes.get(f.session_id) ?? 0) + (f.image?.length ?? 0));
+  const withRecording = (s: SessionRow): SessionRow => {
+    const replay_bytes = replayBytes.get(s.id) ?? 0;
+    return { ...s, replay_bytes, dom_bytes: 0, has_recording: replay_bytes > 0 };
+  };
   return {
     sessions: [
-      ...g.sessions,
-      ...real.sessions.map(({ created_at: _c, ...s }) => ({ ...s, started_at: move(s.started_at), last_seen_at: move(s.last_seen_at) })),
+      ...g.sessions.map(withRecording),
+      ...real.sessions.map(({ created_at: _c, ...s }) =>
+        withRecording({ ...s, started_at: move(s.started_at), last_seen_at: move(s.last_seen_at) }),
+      ),
     ],
     events: [...g.events, ...real.events.map((e) => ({ ...e, at: move(e.at) }))],
     members: [
       { email: 'demo@example.com', role: 'admin', created_at: new Date(now - 5 * 86_400_000).toISOString() },
       { email: 'design@example.com', role: 'viewer', created_at: new Date(now - 86_400_000).toISOString() },
     ],
-    frames: demoFrames(g.sessions, g.events),
+    frames,
     settings: {
       id: 1,
       keep_days: 90,
@@ -232,6 +244,8 @@ export function buildDataset(now = Date.now()): Dataset {
       max_frames: 600,
       daily_sessions: null,
       max_db_mb: 400,
+      max_replay_mb: 300,
+      max_visit_replay_mb: 10,
       last_purge_at: null,
       updated_at: new Date(now - 86_400_000).toISOString(),
       updated_by: null,
