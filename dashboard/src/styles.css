@@ -183,6 +183,8 @@ table.clickable tbody tr:hover { background: var(--accent-soft); }
 .page-map-note { position: absolute; left: 8px; right: 8px; top: 8px; padding: 6px 8px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); font-size: 12px; }
 .page-map-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
 table.clickable tbody tr.on { background: var(--accent-soft); }
+table.clickable tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.warn-text { color: var(--warn); font-weight: 600; }
 .seg button:disabled { opacity: 0.45; cursor: default; }
 
 @media (max-width: 800px) {

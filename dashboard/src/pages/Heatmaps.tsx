@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Heatmap } from '../components/Heatmap';
 import { PageHeatmap } from '../components/PageHeatmap';
-import { pageSnapshotFor, screenActivity, screenStats, screenshotFor } from '../lib/data';
+import { eventNames } from '../lib/analytics';
+import { pageSnapshotFor, screenActivity, screenStats, screenshotFor, sessionsWithEvent } from '../lib/data';
 import {
   DEVICE_CLASSES,
   type DeviceClass,
@@ -12,6 +13,7 @@ import {
   layoutViewport,
   rageTaps,
   scrollReach,
+  targetKey,
   toTap,
   topTargets,
 } from '../lib/heatmap';
@@ -35,8 +37,23 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
     setHighlight(null);
   }, [appId, current]);
 
-  const taps = useMemo(() => (activity.data?.taps ?? []).map(toTap), [activity.data]);
-  const web = taps.length ? taps.some((t) => t.web) : [...(activity.data?.sessions.values() ?? [])].some((s) => s.platform === 'web');
+  // A segment: only the visits that did (or didn't) send one of the app's own events, e.g. signed_up.
+  const [segment, setSegment] = useState<{ name: string; did: boolean } | null>(null);
+  useEffect(() => setSegment(null), [appId]);
+  const custom = useAsync(() => eventNames(appId, since).then((l) => l.filter((e) => e.kind === 'custom')), [appId, since]);
+  const segmentSessions = useAsync(
+    () => (segment ? sessionsWithEvent(appId, segment.name, since) : Promise.resolve(null)),
+    [appId, since, segment?.name],
+  );
+  const inSegment = useMemo(() => {
+    const set = segmentSessions.data;
+    if (!segment || !set) return () => true;
+    return (sessionId: string) => set.has(sessionId) === segment.did;
+  }, [segment, segmentSessions.data]);
+
+  const allTaps = useMemo(() => (activity.data?.taps ?? []).map(toTap), [activity.data]);
+  const taps = useMemo(() => allTaps.filter((t) => inSegment(t.sessionId)), [allTaps, inSegment]);
+  const web = allTaps.length ? allTaps.some((t) => t.web) : [...(activity.data?.sessions.values() ?? [])].some((s) => s.platform === 'web');
   const counts = countByDevice(taps);
   const shown: DeviceClass = device ?? busiestDevice(taps);
   const here = useMemo(() => taps.filter((t) => t.device === shown), [taps, shown]);
@@ -48,8 +65,8 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
     if (!a) return [];
     return a.views
       .map((v) => ({ ...v, s: a.sessions.get(v.sessionId) }))
-      .filter((v) => v.s && deviceClass(v.s.screen_width) === shown);
-  }, [activity.data, shown]);
+      .filter((v) => v.s && deviceClass(v.s.screen_width) === shown && inSegment(v.sessionId));
+  }, [activity.data, shown, inSegment]);
   const reach = useMemo(
     () => scrollReach(visits.map((v) => v.sessionId), activity.data?.maxDepth ?? new Map()),
     [visits, activity.data],
@@ -57,6 +74,15 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
   const rage = useMemo(() => rageTaps(here), [here]);
   const dead = useMemo(() => here.filter(isDeadTap), [here]);
   const targets = useMemo(() => topTargets(here, (sel) => names.get(sel) ?? null), [here, names]);
+  // Where the rage taps were, by element.
+  const rageBy = useMemo(() => {
+    const by = new Map<string, number>();
+    for (const g of rage) {
+      const k = targetKey(g[0]!);
+      if (k) by.set(k, (by.get(k) ?? 0) + 1);
+    }
+    return targets.filter((t) => by.has(t.key)).map((t) => ({ ...t, rage: by.get(t.key)! })).sort((a, b) => b.rage - a.rage);
+  }, [rage, targets]);
 
   // The page behind the taps: the newest recorded visit at this size.
   const recorded = useMemo(
@@ -110,8 +136,31 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
             </button>
           ))}
         </div>
+        {(custom.data?.length ?? 0) > 0 && (
+          <select
+            aria-label="Which visits"
+            value={segment ? `${segment.did ? 'did' : 'not'}:${segment.name}` : ''}
+            onChange={(e) => {
+              const v = e.target.value;
+              setSegment(v ? { did: v.startsWith('did:'), name: v.slice(4) } : null);
+            }}
+          >
+            <option value="">All visits</option>
+            {custom.data!.map((ev) => (
+              <option key={`did:${ev.name}`} value={`did:${ev.name}`}>
+                Visits with {ev.name}
+              </option>
+            ))}
+            {custom.data!.map((ev) => (
+              <option key={`not:${ev.name}`} value={`not:${ev.name}`}>
+                Visits without {ev.name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       {activity.error && <p className="error">{activity.error}</p>}
+      {segmentSessions.error && <p className="error">{segmentSessions.error}</p>}
 
       <div className="kpis heat-kpis">
         <Kpi label="Visits" value={loading ? '…' : visitCount.toLocaleString()} />
@@ -150,6 +199,9 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
           <p className="muted small">
             {loading ? 'Loading…' : `${here.length.toLocaleString()} taps from ${visitCount.toLocaleString()} visits in this period.`}{' '}
             {activity.data?.capped && 'Only the newest 5,000 taps are shown. '}
+            {!loading && visitCount > 0 && visitCount < 30 && (
+              <strong className="warn-text">Only {visitCount} visits: a pattern this small can be chance. </strong>
+            )}
             {web
               ? 'Each tap is where it landed on the page, at this device size; taps on a bar that stays on screen are drawn on the bar.'
               : 'Positions are shares of the screen, so they line up across phone sizes.'}
@@ -197,8 +249,12 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
                   <tr
                     key={t.key}
                     className={highlight === t.key ? 'on' : ''}
+                    tabIndex={0}
+                    aria-label={`${t.name}: ${t.count} taps. Show on the map`}
                     onMouseEnter={() => setHighlight(t.key)}
                     onMouseLeave={() => setHighlight(null)}
+                    onFocus={() => setHighlight(t.key)}
+                    onBlur={() => setHighlight(null)}
                     onClick={() => setHighlight((h) => (h === t.key ? null : t.key))}
                   >
                     <td title={t.key.startsWith('sel:') ? t.key.slice(4) : undefined}>
@@ -212,6 +268,29 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
                 ))}
               </tbody>
             </table>
+          )}
+          {rageBy.length > 0 && (
+            <>
+              <h3>Rage taps</h3>
+              <table className="clickable">
+                <tbody>
+                  {rageBy.slice(0, 8).map((t) => (
+                    <tr
+                      key={t.key}
+                      tabIndex={0}
+                      className={highlight === t.key ? 'on' : ''}
+                      onMouseEnter={() => setHighlight(t.key)}
+                      onMouseLeave={() => setHighlight(null)}
+                      onFocus={() => setHighlight(t.key)}
+                      onBlur={() => setHighlight(null)}
+                    >
+                      <td>{t.name}</td>
+                      <td className="num">{t.rage === 1 ? '1 visit' : `${t.rage} times`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
           )}
           {web && reach.length > 0 && visitCount > 0 && (
             <>

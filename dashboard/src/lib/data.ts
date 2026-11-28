@@ -258,21 +258,43 @@ export interface HeatmapSession {
 
 export const HEATMAP_TAP_LIMIT = 5000;
 
+/** Sessions by id, 150 to a request and six requests at a time (a busy screen has thousands). */
 async function sessionsById(ids: string[]): Promise<Map<string, HeatmapSession>> {
   const out = new Map<string, HeatmapSession>();
   const unique = [...new Set(ids)];
-  for (let i = 0; i < unique.length; i += 150) {
-    const chunk = unique.slice(i, i + 150);
-    const run = (withRecording: boolean) =>
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += 150) chunks.push(unique.slice(i, i + 150));
+  let withRecording = true;
+  const one = async (chunk: string[]) => {
+    const run = (rec: boolean) =>
       db()
         .from('recap_sessions')
-        .select(`id,platform,screen_width,screen_height,started_at${withRecording ? ',has_recording' : ''}`)
+        .select(`id,platform,screen_width,screen_height,started_at${rec ? ',has_recording' : ''}`)
         .in('id', chunk);
-    let res = await run(true);
-    if (res.error && /has_recording|42703/.test(`${res.error.message} ${(res.error as { code?: string }).code ?? ''}`)) res = await run(false);
+    let res = await run(withRecording);
+    if (res.error && /has_recording|42703/.test(`${res.error.message} ${(res.error as { code?: string }).code ?? ''}`)) {
+      withRecording = false; // a database from before the recording limits
+      res = await run(false);
+    }
     for (const r of check(res) as unknown as HeatmapSession[]) out.set(r.id, r);
-  }
+  };
+  for (let i = 0; i < chunks.length; i += 6) await Promise.all(chunks.slice(i, i + 6).map(one));
   return out;
+}
+
+/** Sessions in the period that sent this custom event (for "visits that signed up" and the like). */
+export async function sessionsWithEvent(appId: string, name: string, since: string): Promise<Set<string>> {
+  const rows = check(
+    await db()
+      .from('recap_events')
+      .select('session_id')
+      .eq('app_id', appId)
+      .eq('type', 'custom')
+      .eq('data->>name', name)
+      .gte('at', since)
+      .limit(20000),
+  ) as { session_id: string }[];
+  return new Set(rows.map((r) => r.session_id));
 }
 
 export async function screenActivity(appId: string, screen: string, since: string): Promise<ScreenActivity> {
@@ -288,7 +310,7 @@ export async function screenActivity(appId: string, screen: string, since: strin
       .limit(limit);
   const [tapRes, viewRes, scrollRes] = await Promise.all([
     events('tap', 'session_id,t_ms,data', HEATMAP_TAP_LIMIT),
-    events('screen', 'session_id,t_ms', 10000),
+    events('screen', 'session_id,t_ms', 5000),
     events('scroll', 'session_id,data', 10000),
   ]);
   const taps = check(tapRes) as unknown as { session_id: string; t_ms: number; data: Record<string, unknown> }[];

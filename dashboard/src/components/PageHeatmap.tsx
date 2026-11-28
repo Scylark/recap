@@ -30,7 +30,10 @@ const MAX_PAGE = 16000;
 
 export function PageHeatmap({ taps, snapshot, viewport, reach, rage, onNames, highlight = null }: Props) {
   const width = Math.round(snapshot?.width || viewport.width);
-  const foldCss = snapshot?.height || Math.round((viewport.height * width) / Math.max(1, viewport.width));
+  // The fold of a typical window at this size (the middle of the visits'), drawn at the page's width.
+  const foldCss = Math.round((viewport.height * width) / Math.max(1, viewport.width)) || snapshot?.height || 0;
+  // The recorded visitor's own window: their 100vh is what the page was laid out with.
+  const builtHeight = snapshot?.height || foldCss;
   const box = useRef<HTMLDivElement>(null);
   const holder = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -61,7 +64,7 @@ export function PageHeatmap({ taps, snapshot, viewport, reach, rage, onNames, hi
     let r: Replayer | null = null;
     const timers: number[] = [];
     try {
-      const events = tallPageEvents(snapshot.events, width, foldCss);
+      const events = tallPageEvents(snapshot.events, width, builtHeight);
       r = new Replayer(events as unknown as ConstructorParameters<typeof Replayer>[0], {
         root: el,
         showWarning: false,
@@ -80,7 +83,7 @@ export function PageHeatmap({ taps, snapshot, viewport, reach, rage, onNames, hi
       const doc = iframe.contentDocument;
       const win = iframe.contentWindow;
       if (!doc || !win || !doc.documentElement) return;
-      const natural = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight ?? 0, foldCss);
+      const natural = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight ?? 0, builtHeight);
       const height = Math.min(MAX_PAGE, Math.round(natural));
       iframe.setAttribute('height', String(height));
       iframe.style.height = `${height}px`;
@@ -115,7 +118,7 @@ export function PageHeatmap({ taps, snapshot, viewport, reach, rage, onNames, hi
       el.innerHTML = '';
     };
     // selectors is derived from taps; rebuilding the page when only the device changes is the point.
-  }, [snapKey, width, foldCss, selectors.join('\n')]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [snapKey, width, builtHeight, selectors.join('\n')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pageHeight = page?.height ?? Math.min(MAX_PAGE, pageHeightFromTaps(taps, width, foldCss));
   const placed = useMemo(
