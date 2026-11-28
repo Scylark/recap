@@ -25,7 +25,15 @@ export function colour(v: number): [number, number, number] {
  * The most canvas pixels drawn: past this the map draws at a lower resolution rather than fail.
  * iOS Safari refuses a canvas over about 16.7 million pixels.
  */
-const MAX_PIXELS = 16_000_000;
+export const MAX_PIXELS = 16_000_000;
+
+/**
+ * Device pixels per CSS px for a canvas of width x height: the screen's own, or less so the canvas
+ * stays within MAX_PIXELS. There is no lower limit: the cap always wins, whatever the size asked for.
+ */
+export function heatResolution(width: number, height: number, want = 1): number {
+  return Math.min(want, Math.sqrt(MAX_PIXELS / Math.max(1, width * height)));
+}
 
 /**
  * Draw `points` (CSS px within width × height) onto `canvas`, sized to those CSS px. Returns the
@@ -39,9 +47,9 @@ export function drawHeat(
   radius: number,
 ): number {
   const want = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-  const dpr = Math.max(0.25, Math.min(want, Math.sqrt(MAX_PIXELS / Math.max(1, width * height))));
-  canvas.width = Math.max(1, Math.round(width * dpr));
-  canvas.height = Math.max(1, Math.round(height * dpr));
+  const dpr = heatResolution(width, height, want);
+  canvas.width = Math.max(1, Math.floor(width * dpr));
+  canvas.height = Math.max(1, Math.floor(height * dpr));
   // The colour pass reads the whole canvas back once per draw.
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return dpr;

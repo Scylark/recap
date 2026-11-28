@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Replayer } from 'rrweb';
 import 'rrweb/dist/style.css';
 import type { PageSnapshot } from '../lib/data';
-import { type Anchor, type Tap, depthToY, pageHeightFromTaps, placeWebTap, targetKey } from '../lib/heatmap';
+import { type Anchor, type Tap, MAX_RECORDED_WIDTH, depthToY, pageHeightFromTaps, placeWebTap, targetKey } from '../lib/heatmap';
 import { elementName, tallPageEvents } from '../lib/snapshot';
 import { drawHeat } from './heat';
 
@@ -40,7 +40,8 @@ const MATCHES_IN_ALL = 1500;
 const CONTROL_ROLES = new Set(['button', 'link', 'checkbox', 'radio', 'switch', 'tab', 'menuitem', 'option', 'menuitemcheckbox', 'menuitemradio', 'treeitem']);
 
 export function PageHeatmap({ taps, snapshot, viewport, reach, rage, onElements, highlight = null }: Props) {
-  const width = Math.round(snapshot?.width || viewport.width);
+  // Clamped again here: the page and its canvas are this wide, whatever a recording claims.
+  const width = Math.max(200, Math.min(MAX_RECORDED_WIDTH, Math.round(snapshot?.width || viewport.width)));
   // The fold of a typical window at this size (the middle of the visits'). Depths stay in CSS px.
   const foldCss = Math.round(viewport.height) || snapshot?.height || 0;
   // The recorded visitor's own window: their 100vh is what the page was laid out with.

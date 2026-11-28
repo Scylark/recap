@@ -14,10 +14,12 @@ import {
   toTap,
   targetsCsv,
   topTargets,
+  trustedRecordingSize,
   type Anchor,
   type TapRow,
 } from '../src/lib/heatmap';
 import { fixViewportUnits, tallPageEvents } from '../src/lib/snapshot';
+import { MAX_PIXELS, heatResolution } from '../src/components/heat';
 
 const webTap = (data: Record<string, unknown>, over: Partial<TapRow> = {}): TapRow => ({
   sessionId: 's1',
@@ -262,5 +264,30 @@ describe('which recording to draw', () => {
   it('tries each visit to a screen once', () => {
     const v = { sessionId: 'a', tMs: 5, startedAt: '2026-11-27T10:00:00.000Z' };
     expect(recordingOrder([v, { ...v }, { ...v, tMs: 9 }])).toHaveLength(2);
+  });
+});
+
+describe('a recording cannot size the page past what is safe', () => {
+  it('skips a recording whose window is far from its session\'s, and clamps the rest', () => {
+    expect(trustedRecordingSize({ width: 100000, height: 900 }, 1440)).toBeNull();
+    expect(trustedRecordingSize({ width: 390, height: 844 }, 1440)).toBeNull();
+    expect(trustedRecordingSize({ width: 1440, height: 900 }, 1440)).toEqual({ width: 1440, height: 900 });
+    expect(trustedRecordingSize({ width: 2000, height: 900 }, 1440)).toEqual({ width: 2000, height: 900 });
+    expect(trustedRecordingSize({ width: 100000, height: 100000 }, null)).toEqual({ width: 4000, height: 4000 });
+    expect(trustedRecordingSize({ width: 'wide', height: 900 }, 1440)).toBeNull();
+    expect(trustedRecordingSize({}, 1440)).toBeNull();
+  });
+
+  it('keeps the heat canvas within the pixel cap at any size', () => {
+    for (const [w, h] of [
+      [100000, 4000],
+      [4000, 16000],
+      [390, 16000],
+      [1e7, 1e7],
+    ]) {
+      const dpr = heatResolution(w!, h!, 3);
+      expect(Math.floor(w! * dpr) * Math.floor(h! * dpr)).toBeLessThanOrEqual(MAX_PIXELS);
+    }
+    expect(heatResolution(390, 3000, 2)).toBe(2);
   });
 });

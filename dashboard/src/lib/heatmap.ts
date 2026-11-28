@@ -358,3 +358,24 @@ export function recordingOrder(visits: RecordedVisit[], width?: number | null): 
   const at = (v: RecordedVisit) => Date.parse(v.startedAt) + v.tMs;
   return unique.sort((a, b) => gap(a) - gap(b) || at(b) - at(a));
 }
+
+/** The widest and tallest window a recording may claim; larger is a broken or forged recording. */
+export const MAX_RECORDED_WIDTH = 4000;
+export const MAX_RECORDED_HEIGHT = 4000;
+
+/**
+ * The window a recording says it was made in, if it can be believed. Anyone with the public key can
+ * upload a recording, and its size sets the size of the drawn page and the heat canvas, so it must be
+ * within 1.5x of the window its session reported, and is clamped to a sane maximum. Null: skip it.
+ */
+export function trustedRecordingSize(
+  meta: { width?: unknown; height?: unknown },
+  sessionWidth?: number | null,
+): { width: number; height: number } | null {
+  const w = Number(meta.width);
+  const h = Number(meta.height);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w < 200 || h < 200) return null;
+  if (sessionWidth && sessionWidth > 0 && (w > sessionWidth * 1.5 || w * 1.5 < sessionWidth)) return null;
+  return { width: Math.min(MAX_RECORDED_WIDTH, Math.round(w)), height: Math.min(MAX_RECORDED_HEIGHT, Math.round(h)) };
+}
+

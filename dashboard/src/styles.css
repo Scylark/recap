@@ -155,6 +155,7 @@ table.clickable tbody tr:hover { background: var(--accent-soft); }
 .pair.heat-pair > .heat-main { max-width: none; flex: 0 1 auto; min-width: 0; }
 .heat-kpis { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); max-width: 900px; }
 .page-map-box { max-width: 100%; }
+.heat-loading { width: 300px; max-width: 100%; height: 420px; display: grid; place-items: center; border: 1px dashed var(--line); border-radius: 12px; }
 .page-map {
   position: relative; overflow: hidden; margin: 0 auto 8px;
   border: 1px solid var(--line); border-radius: 12px; background: #fff;
