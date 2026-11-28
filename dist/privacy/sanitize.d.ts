@@ -36,8 +36,9 @@ export declare function isExcluded(el: Element): boolean;
 export declare function isMasked(el: Element): boolean;
 /**
  * Where tap labels may come from.
- * - `'text'`: also the element's visible text (first 50 characters).
- * - `'attributes'`: only aria-label, aria-labelledby, title, alt and placeholder, never visible text.
+ * - `'text'`: also the element's visible text (first 50 characters) and aria-labelledby (the
+ *   visible text of the elements it points to).
+ * - `'attributes'`: only aria-label, title, alt and placeholder, never visible text.
  * - `'none'`: only labels you write yourself with data-ut-label.
  * data-ut-label is always used, in every mode and inside the mask marker: it is the developer's own words.
  */
@@ -53,7 +54,7 @@ export declare const INTERACTIVE_SELECTOR: string;
 export declare function interactiveTarget(el: Element): Element;
 /**
  * Extract the best human-readable label for a clicked element.
- * Priority: data-ut-label > aria-label > aria-labelledby > title > alt >
+ * Priority: data-ut-label > aria-label > aria-labelledby (`'text'` mode only) > title > alt >
  *           visible text (50 chars, `'text'` mode only) > placeholder.
  * Inside the mask marker (data-recap-mask, recap-mask, ut-mask), and in `'none'` mode, only data-ut-label is used.
  */

@@ -14,14 +14,14 @@ import {
 // --- CSS selector generation ---
 
 /**
- * Generate a human-readable, stable CSS selector for a DOM element.
- * Strategy (per spec):
- *  1. #id → return immediately
- *  2. data-ut-label → [data-ut-label="value"]
- *  3. Walk up to body, building a path of tag + class/nth-of-type segments
- *  4. Stop at an ancestor with id → use #id as root
- *  5. Cap at 5 levels
+ * Whether an element id may go in a selector. Ids with an @ or a run of three or more digits are
+ * often personal details or record numbers (#user-jane@x.com, #order-12345), which selectors
+ * would send to the dashboard; those elements are described by tag and position instead.
  */
+export function usableId(id: string): boolean {
+  return id !== '' && !id.includes('@') && !/\d{3}/.test(id);
+}
+
 /** Simple CSS identifier escaper (subset of CSS.escape) */
 function cssEscape(value: string): string {
   if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(value);
@@ -29,9 +29,18 @@ function cssEscape(value: string): string {
   return value.replace(/([^\w-])/g, '\\$1').replace(/^(\d)/, '\\3$1 ');
 }
 
+/**
+ * Generate a human-readable, stable CSS selector for a DOM element.
+ * Strategy (per spec):
+ *  1. #id → return immediately (only ids that pass usableId)
+ *  2. data-ut-label → [data-ut-label="value"]
+ *  3. Walk up to body, building a path of tag + class/nth-of-type segments
+ *  4. Stop at an ancestor with a usable id → use #id as root
+ *  5. Cap at 5 levels
+ */
 export function generateSelector(el: Element): string {
   // 1. ID
-  if (el.id) return `#${cssEscape(el.id)}`;
+  if (usableId(el.id)) return `#${cssEscape(el.id)}`;
 
   // 2. data-ut-label
   const utLabel = el.getAttribute('data-ut-label');
@@ -44,7 +53,7 @@ export function generateSelector(el: Element): string {
     const tag = current.tagName.toLowerCase();
 
     // If this ancestor has an id, use it as root and stop
-    if (current.id && current !== el) {
+    if (current !== el && usableId(current.id)) {
       segments.push(`#${cssEscape(current.id)}`);
       break;
     }

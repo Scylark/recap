@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
+import { integrityOf } from './scripts/rrweb-integrity.mjs';
 
 export default defineConfig(({ command, mode }) => {
   if (command === 'serve') {
@@ -23,14 +24,15 @@ export default defineConfig(({ command, mode }) => {
     };
   }
 
-  // Production library build, in three passes:
+  // Production library build, in three passes, in this order (`npm run build`):
   // - `vite build`: the ES and CommonJS modules from src/index.ts. Importing them starts nothing.
-  // - `vite build --mode script-tag`: dist/recap.min.js from src/browser.ts, which starts itself
-  //   from its <script> tag's data-* attributes.
   // - `vite build --mode rrweb`: dist/recap-rrweb.min.js, rrweb's `record` only, as a plain browser
-  //   script that sets window.rrweb. Recap loads it on its own when a tab is sampled in for page
+  //   script that sets window.RecapRrweb. Recap loads it on its own when a tab is sampled in for page
   //   recordings. It is a .js file because jsDelivr serves rrweb's own .umd.min.cjs as
   //   application/node with nosniff, which browsers refuse to run.
+  // - `vite build --mode script-tag`: dist/recap.min.js from src/browser.ts, which starts itself
+  //   from its <script> tag's data-* attributes. It carries the sha384 hash of the
+  //   recap-rrweb.min.js just built, and loads that file only if it matches.
   if (mode === 'rrweb') {
     return {
       // rrweb's bundle sets up its CSS parser (postcss, about 70 kB) at the top level, so it is
@@ -71,6 +73,8 @@ export default defineConfig(({ command, mode }) => {
 
   const scriptTag = mode === 'script-tag';
   return {
+    // The recorder's hash, read from dist/recap-rrweb.min.js (the build fails if it isn't there).
+    ...(scriptTag ? { define: { __RECAP_RRWEB_INTEGRITY__: JSON.stringify(integrityOf()) } } : {}),
     build: {
       emptyOutDir: !scriptTag, // the second pass adds to the first one's output
       lib: {

@@ -1,6 +1,6 @@
 {
   "name": "recap-ux",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Lightweight, privacy-first usability testing for web prototypes. Drop-in heatmaps, scroll depth, and AI-ready session exports with zero cookies and zero backend.",
   "type": "module",
   "main": "./dist/recap.cjs.js",
@@ -61,7 +61,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build && vite build --mode script-tag && vite build --mode rrweb && vite build --config vite.react.config.ts && tsc --emitDeclarationOnly",
+    "build": "vite build && vite build --mode rrweb && vite build --mode script-tag && vite build --config vite.react.config.ts && tsc --emitDeclarationOnly",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

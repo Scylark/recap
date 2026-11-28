@@ -1,15 +1,32 @@
 import type { AnyEvent } from '../types.js';
-export declare const REMOTE_SDK_VERSION = "web-0.3.0";
-/** The rrweb maskTextSelector for a recordings.maskText setting. The mask marker is always masked. */
+export declare const REMOTE_SDK_VERSION = "web-0.3.1";
+/**
+ * Places people type that aren't form fields: contenteditable regions (chat boxes, rich-text
+ * editors) and custom text boxes. Their text is always masked in recordings, like form fields.
+ */
+export declare const EDITABLE_SELECTOR = "[contenteditable]:not([contenteditable=\"false\"]), [role=\"textbox\"]";
+/**
+ * rrweb's maskInputOptions: every kind of field whose value is text, including hidden fields (CSRF
+ * tokens) and file pickers (the file name). The same list as rrweb's maskAllInputs, plus hidden
+ * and file. Checkboxes and radio buttons keep their ticked state.
+ */
+export declare const MASK_INPUT_OPTIONS: Readonly<Record<string, true>>;
+/**
+ * The rrweb maskTextSelector for a recordings.maskText setting. The mask marker and editable
+ * regions are always masked.
+ */
 export declare function maskTextSelectorFor(maskText: boolean | string | undefined): string;
+/** Whether the browser accepts `selector` as a CSS selector list. */
+export declare function isValidSelector(selector: string): boolean;
 /** Canvas frames per second for a recordings.canvas setting: 2 for true, the number given, or 0 (off). */
 export declare function canvasFps(canvas: boolean | number | undefined): number;
 /**
- * Where to load recap-rrweb.min.js from when recordings.src isn't set. The script-tag build sets it
- * to the folder recap.min.js was loaded from.
+ * Where to load recap-rrweb.min.js from when recordings.src isn't set, and its subresource
+ * integrity hash. The script-tag build sets them to the folder recap.min.js was loaded from and the
+ * hash of the recap-rrweb.min.js built with it.
  * @internal
  */
-export declare function setDefaultRrwebSrc(src: string | null): void;
+export declare function setDefaultRrwebSrc(src: string | null, integrity?: string | null): void;
 /**
  * Add a <script> for `src` once per address, resolving when it has run. Rejects (never throws) if
  * it can't load: offline, blocked by a Content-Security-Policy, the wrong address or the wrong
@@ -32,16 +49,26 @@ export interface RrwebEvent {
 export interface RemoteRecordingOptions {
     /**
      * rrweb's record function (`import { record } from 'rrweb'`, version 2.2.2). Without it Recap
-     * uses `window.rrweb.record` if rrweb is on the page, or else loads recap-rrweb.min.js from `src`.
+     * loads recap-rrweb.min.js from `src` (or uses `window.rrweb.record` with `useGlobalRrweb`).
      */
     record?: RrwebRecord;
+    /**
+     * Use `window.rrweb.record` when the page already has rrweb, instead of loading Recap's own
+     * recorder. Only for an rrweb 2.2.2 you load yourself: another version may not mask the same way.
+     * Default false: rrweb already on the page is ignored.
+     */
+    useGlobalRrweb?: boolean;
     /**
      * Address of recap-rrweb.min.js (rrweb's recorder as a plain script), loaded only for tabs sampled
      * in for recordings and only when `record` isn't given. The script-tag build defaults to the folder
      * recap.min.js came from; module builds need this or `record`. Script tag: data-recordings-src.
      */
     src?: string;
-    /** Subresource integrity hash for `src`, e.g. "sha384-…". Script tag: data-recordings-integrity. */
+    /**
+     * Subresource integrity hash for `src`, e.g. "sha384-…". The script-tag build checks its own
+     * recap-rrweb.min.js (the one next to recap.min.js) against the hash it was built with; this
+     * replaces that. Script tag: data-recordings-integrity.
+     */
     integrity?: string;
     /** Share of tabs to record, 0 to 1. Default 1. Script tag: data-record-sample. */
     sampleRate?: number;
@@ -51,13 +78,17 @@ export interface RemoteRecordingOptions {
      * data-record-canvas.
      */
     canvas?: boolean | number;
-    /** Extra CSS selector for parts of the page never recorded. The privacy marker (`data-recap-private`, `.recap-private`) always is. */
+    /**
+     * Extra CSS selector for parts of the page never recorded. The privacy marker (`data-recap-private`,
+     * `.recap-private`) always is. If it isn't a valid selector, nothing is recorded (an error says why).
+     */
     blockSelector?: string;
     /**
      * Text to replace with `*` in recordings, keeping the layout: `true` for all text on the page, or
      * a CSS selector for the parts to mask (and everything inside them). Text inside the mask marker
-     * (`data-recap-mask`, `.recap-mask`) is always masked. Form fields are always masked, whatever
-     * this says. Default: only the mask marker.
+     * (`data-recap-mask`, `.recap-mask`) is always masked, and so is text in contenteditable regions
+     * and `role="textbox"`. Form fields are always masked, whatever this says. Default: only those.
+     * If the selector isn't valid, nothing is recorded (an error says why).
      */
     maskText?: boolean | string;
 }
@@ -106,6 +137,11 @@ interface IngestEvent {
     data: Record<string, unknown>;
 }
 type FetchFn = typeof fetch;
+/**
+ * Forget this tab's dashboard session and the browser's random id (the visitor opted out), so a
+ * later opt-in starts a new session, sampled afresh, that can't be linked to this one.
+ */
+export declare function forgetRemoteSession(): void;
 export declare class RemoteSink {
     private readonly config;
     private readonly fetchFn;
@@ -131,14 +167,15 @@ export declare class RemoteSink {
     /** Recording is off for the rest of this page load (it went to a path in excludePaths). */
     private recordingBlocked;
     private readonly opts;
+    private readonly cleaner;
     constructor(config: RemoteConfig, fetchFn?: FetchFn, opts?: SinkOptions);
     /** Start sending. Returns false if this session wasn't sampled, or the key is a secret one. */
     start(): boolean;
     stop(): void;
     /**
      * The visitor opted out: stop at once and delete everything not yet sent (events and
-     * recording). The browser's random id is forgotten too, so a later opt-in can't be linked to
-     * earlier visits.
+     * recording). This tab's session and the browser's random id are forgotten too, so a later
+     * opt-in starts a new session that can't be linked to earlier visits.
      */
     discard(): void;
     getSessionId(): string;
@@ -153,7 +190,11 @@ export declare class RemoteSink {
     blockRecording(reason: string): void;
     /** Feed one event from the web tracker's capture layers. */
     handle(event: AnyEvent): void;
-    /** A custom event, e.g. track('added_to_basket', { sku: 'A1' }). */
+    /**
+     * A custom event, e.g. track('added_to_basket', { sku: 'A1' }). The properties are copied as JSON
+     * now: ones that can't be (circular, BigInt) or come to more than 8 KB drop the event, so one bad
+     * call can't hold up the rest of the session. A `name` property can't replace the event's name.
+     */
     track(name: string, props?: Record<string, unknown>): void;
     pending(): readonly IngestEvent[];
     private push;
@@ -180,13 +221,6 @@ export declare class RemoteSink {
     /** Stop recording this session and drop what's buffered. */
     private endRecording;
     private pushDom;
-    /**
-     * An rrweb event as it may be stored. Meta events carry the page address: keep its origin and
-     * path (the Replayer needs an absolute address to load relative images and stylesheets) and drop
-     * the hash and, unless stripQueryParams is false, the query string, which can hold ids and
-     * tokens. Same rules as the addresses of page views, but without the screenName hook.
-     */
-    private cleanDom;
     /** The oldest buffered events, up to maxBytes. Always at least one, so a big snapshot goes alone. */
     private takeDomChunk;
     private putBackDom;

@@ -87,15 +87,73 @@ describe('loading rrweb when recordings are on', () => {
     sink.stop();
   });
 
-  it("loads nothing when rrweb's record is given or already on the page", () => {
+  it("loads nothing when rrweb's record is given", () => {
     setDefaultRrwebSrc(freshSrc());
     const record = vi.fn(() => () => undefined);
-    w.rrweb = { record };
-    const sink = new RemoteSink({ ...base, recordings: true }, fakeFetch().fn);
+    const sink = new RemoteSink({ ...base, recordings: { record } }, fakeFetch().fn);
     sink.start();
     expect(record).toHaveBeenCalledTimes(1);
     expect(document.querySelectorAll('script')).toHaveLength(0);
     sink.stop();
+  });
+
+  it('ignores rrweb already on the page and loads its own recorder', async () => {
+    const src = freshSrc();
+    setDefaultRrwebSrc(src, 'sha384-built');
+    const theirs = vi.fn(() => () => undefined);
+    w.rrweb = { record: theirs };
+    const sink = new RemoteSink({ ...base, recordings: true }, fakeFetch().fn);
+    sink.start();
+    expect(theirs).not.toHaveBeenCalled();
+    const [tag] = scriptsFor(src);
+    expect(tag).toBeDefined();
+    // The recorder sets window.RecapRrweb.record, which wins over the page's window.rrweb.record.
+    const ours = vi.fn(() => () => undefined);
+    (window as unknown as { RecapRrweb?: unknown }).RecapRrweb = { record: ours };
+    tag!.dispatchEvent(new Event('load'));
+    await tick();
+    expect(ours).toHaveBeenCalledTimes(1);
+    expect(theirs).not.toHaveBeenCalled();
+    sink.stop();
+    delete (window as unknown as { RecapRrweb?: unknown }).RecapRrweb;
+  });
+
+  it('uses window.rrweb.record with useGlobalRrweb: true', () => {
+    setDefaultRrwebSrc(freshSrc());
+    const record = vi.fn(() => () => undefined);
+    w.rrweb = { record };
+    const sink = new RemoteSink({ ...base, recordings: { useGlobalRrweb: true } }, fakeFetch().fn);
+    sink.start();
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(document.querySelectorAll('script')).toHaveLength(0);
+    sink.stop();
+  });
+
+  it("checks its own recorder (next to recap.min.js) against the hash it was built with", () => {
+    const src = freshSrc();
+    setDefaultRrwebSrc(src, 'sha384-built');
+    const sink = new RemoteSink({ ...base, recordings: true }, fakeFetch().fn);
+    sink.start();
+    const [tag] = scriptsFor(src);
+    expect(tag!.integrity).toBe('sha384-built');
+    expect(tag!.crossOrigin).toBe('anonymous');
+    sink.stop();
+  });
+
+  it("the site's own integrity wins; its own src gets no built-in hash", () => {
+    const own = freshSrc();
+    setDefaultRrwebSrc(own, 'sha384-built');
+    const a = new RemoteSink({ ...base, recordings: { integrity: 'sha384-owner' } }, fakeFetch().fn);
+    a.start();
+    expect(scriptsFor(own)[0]!.integrity).toBe('sha384-owner');
+    a.stop();
+    sessionStorage.clear();
+
+    const theirs = freshSrc();
+    const b = new RemoteSink({ ...base, recordings: { src: theirs } }, fakeFetch().fn);
+    b.start();
+    expect(scriptsFor(theirs)[0]!.integrity).toBeFalsy();
+    b.stop();
   });
 
   it('a failed load (CSP, offline) is harmless and logged in debug', async () => {

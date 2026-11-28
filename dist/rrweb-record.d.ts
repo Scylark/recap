@@ -1,1 +1,2 @@
-export {};
+import { record } from 'rrweb';
+export { record };

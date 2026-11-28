@@ -140,8 +140,9 @@ export interface RecapConfig {
   shortcut?: string | false;
   stripQueryParams?: boolean; // default true
   /**
-   * Where tap labels come from. `'text'`: also the tapped element's visible text. `'attributes'`:
-   * only aria-label, aria-labelledby, title, alt and placeholder. `'none'`: only your own
+   * Where tap labels come from. `'text'`: also the tapped element's visible text and
+   * aria-labelledby (which points at visible text). `'attributes'`: only aria-label, title, alt
+   * and placeholder. `'none'`: only your own
    * data-ut-label. data-ut-label is always used, and inside the mask marker (`data-recap-mask`,
    * `.recap-mask`) it is the only source.
    * Default: `'text'` while data stays in the browser, `'attributes'` once sessions go to a

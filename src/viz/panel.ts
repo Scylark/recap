@@ -22,6 +22,7 @@ import { pauseClickCapture, resumeClickCapture } from '../capture/clicks.js';
 import { pauseNavigationCapture, resumeNavigationCapture } from '../capture/navigation.js';
 import { pauseScrollCapture, resumeScrollCapture } from '../capture/scroll.js';
 import { buildTimelineHTML, TIMELINE_STYLES } from './timeline-view.js';
+import { escapeHtml } from './escape.js';
 import { eventsInVisit, generateTimeline, visitWindowMs } from '../analysis/timeline.js';
 
 const PREFIX = 'recap-panel';
@@ -841,7 +842,7 @@ function render(
 
   const filterBar = _heatmapFilter
     ? `<div class="${PREFIX}-filter-bar">
-         <span>Showing: <strong>${_heatmapFilter.pagePath}</strong>${_heatmapFilter.label ? ` — ${_heatmapFilter.label}` : ''}</span>
+         <span>Showing: <strong>${escapeHtml(_heatmapFilter.pagePath)}</strong>${_heatmapFilter.label ? ` — ${escapeHtml(_heatmapFilter.label)}` : ''}</span>
          <button class="${PREFIX}-filter-clear" id="${PREFIX}-btn-clear-filter">× clear</button>
        </div>`
     : '';

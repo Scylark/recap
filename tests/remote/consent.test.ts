@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Recap } from '../../src/index';
+import { resetSessionId } from '../../src/capture/session';
 
 type Body = { url: string; payload: { events?: { type: string; data: Record<string, unknown> }[] } };
 
@@ -106,5 +107,61 @@ describe('web consent', () => {
     await Recap.flush();
     expect(events().length).toBe(before);
     expect(localStorage.getItem('recap-remote-anon')).toBeNull();
+  });
+
+  describe('the session in this tab', () => {
+    // A fresh page load: no session id remembered by the module.
+    beforeEach(() => resetSessionId());
+
+    const sessionIds = (bodies: Body[]) =>
+      bodies
+        .filter((b) => b.url.endsWith('recap_ingest'))
+        .map((b) => (b.payload as unknown as { session: { id: string } }).session.id);
+
+    it('with requireConsent, no session id is written until optIn()', () => {
+      stubFetch();
+      Recap.init({ appId: 'site', supabase, requireConsent: true, panel: false });
+      (document.getElementById('b') as HTMLElement).click();
+      expect(sessionStorage.getItem('recap-session-id')).toBeNull();
+      Recap.optIn();
+      expect(sessionStorage.getItem('recap-session-id')).not.toBeNull();
+    });
+
+    it('after optOut(), a later optIn() in the same tab starts a new session', async () => {
+      const { bodies } = stubFetch();
+      const record = vi.fn(() => () => undefined);
+      Recap.init({ appId: 'site', supabase, panel: false, recordings: { record } });
+      await Recap.flush();
+      const [first] = sessionIds(bodies);
+      expect(first).toBeDefined();
+      expect(sessionStorage.getItem('recap-remote-rec')).toBe('1');
+
+      Recap.optOut();
+      for (const key of ['recap-session-id', 'recap-remote-start', 'recap-remote-uploaded', 'recap-remote-sampled', 'recap-remote-rec']) {
+        expect(sessionStorage.getItem(key), key).toBeNull();
+      }
+      (document.getElementById('b') as HTMLElement).click();
+      expect(sessionStorage.getItem('recap-session-id')).toBeNull(); // nothing written while opted out
+
+      Recap.optIn();
+      await Recap.flush();
+      await tick();
+      await Recap.flush();
+      const ids = sessionIds(bodies);
+      expect(new Set(ids).size).toBe(2);
+      expect(ids[ids.length - 1]).not.toBe(first);
+      expect(Recap.getSessionId()).not.toBe(first);
+    });
+
+    it('an opt-out in another tab forgets this tab\'s session too', async () => {
+      stubFetch();
+      Recap.init({ appId: 'site', supabase, panel: false });
+      await Recap.flush();
+      expect(sessionStorage.getItem('recap-remote-start')).not.toBeNull();
+      localStorage.setItem('recap-consent', 'denied');
+      window.dispatchEvent(new StorageEvent('storage', { key: 'recap-consent', newValue: 'denied' }));
+      expect(sessionStorage.getItem('recap-session-id')).toBeNull();
+      expect(sessionStorage.getItem('recap-remote-start')).toBeNull();
+    });
   });
 });

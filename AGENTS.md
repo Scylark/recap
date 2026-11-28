@@ -268,6 +268,9 @@ Then in Supabase, Authentication, URL Configuration: set **Site URL** to the das
 **Redirect URLs**, otherwise email sign-in links will point to localhost. Email sign-in links are enabled by
 default; for a team, also consider turning off open sign-ups (only listed members can see data either way).
 
+Before handing over, walk the owner through the checklist in `docs/security.md` (confirm email on, sign-ups
+off once the team is in, Site URL set, storage limits on).
+
 ## Step 7. Verify
 
 1. Temporarily set `debug: true` in the config, run the app on a simulator or phone and move between a few
@@ -305,8 +308,8 @@ option table.
    `data-app-id` from the mobile app:
    ```html
    <script defer
-     src="https://cdn.jsdelivr.net/gh/Scylark/recap@v1.3.0/dist/recap.min.js"
-     integrity="sha384-8wgD4Wmlu6eME7JD9xA+I/gWbqutajBp2faL0205zSqQYR1kmkBAIkpubfFtUdh5" crossorigin="anonymous"
+     src="https://cdn.jsdelivr.net/gh/Scylark/recap@v1.3.1/dist/recap.min.js"
+     integrity="sha384-k9EqAMrKM17GgIQendxcePn/V9NQwfnTUDRIXEM6seVdxCzKCe3tGn1II7GpPP8v" crossorigin="anonymous"
      data-app-id="my-site-web"
      data-supabase-url="https://abcd1234.supabase.co"
      data-supabase-key="sb_publishable_…"
@@ -392,7 +395,10 @@ that) or build your own views.
 - Hands-on trial on a phone (for people, not agents): `docs/try-it-on-your-phone.md`
 - Database checks against a scratch Postgres: run `supabase/tests/supabase-shim.sql`, then every file in
   `supabase/migrations/` in order, then `security.sql`, `analytics-and-screens.sql`, `recordings.sql`, `dom.sql`,
-  `storage-limits.sql`, `dom-limits.sql` and `recording-limits.sql` from `supabase/tests/`, in that order.
+  `storage-limits.sql`, `dom-limits.sql`, `recording-limits.sql` and `hardening.sql` from `supabase/tests/`,
+  in that order.
+- Security model, owner checklist and review history: `docs/security.md`. Read it before changing an upload
+  function, a policy or the dashboard's headers.
 - Analytics parity (database functions vs the demo's copies):
   `cd dashboard && RECAP_TEST_PG=postgres://... TZ=UTC npx vitest run tests/analytics-parity.test.ts` on a scratch database.
 - The web library in `src/` has its own tests: `npm install && npm test` at the root.

@@ -101,7 +101,9 @@ describe('RemoteSink', () => {
     });
     const sink = new RemoteSink({ ...config, recordings: { record } }, fn);
     sink.start();
-    expect(record.mock.calls[0]![0]).toMatchObject({ maskAllInputs: true });
+    // Every text field is masked, hidden fields too (rrweb's maskAllInputs leaves those out).
+    expect(record.mock.calls[0]![0]).toMatchObject({ maskInputOptions: { text: true, password: true, hidden: true } });
+    expect(record.mock.calls[0]![0]).not.toHaveProperty('maskAllInputs');
     expect(String((record.mock.calls[0]![0] as { blockSelector: string }).blockSelector)).toContain('.recap-private');
     emit!({ type: 2, timestamp: Date.now(), data: { node: {} } }); // full snapshot, before the session is uploaded
     expect(calls).toHaveLength(0);
@@ -365,14 +367,16 @@ describe('RemoteSink recordings text masking', () => {
     return (record.mock.calls[0] as unknown as [Record<string, unknown>])[0];
   }
 
-  // The mask marker: data-recap-mask and recap-mask, and the older ut-mask.
-  const MASK = '[data-recap-mask], .recap-mask, .ut-mask';
+  // The mask marker: data-recap-mask and recap-mask, and the older ut-mask; and editable regions.
+  const MASK =
+    '[data-recap-mask], .recap-mask, .ut-mask, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
+  const FIELDS = { maskInputOptions: { text: true, email: true, hidden: true } };
 
   it('masks the mask marker by default, all text with maskText: true, or a selector', () => {
-    expect(optionsFor()).toMatchObject({ maskAllInputs: true, maskTextSelector: MASK });
-    expect(optionsFor(true)).toMatchObject({ maskAllInputs: true, maskTextSelector: '*' });
+    expect(optionsFor()).toMatchObject({ ...FIELDS, maskTextSelector: MASK });
+    expect(optionsFor(true)).toMatchObject({ ...FIELDS, maskTextSelector: '*' });
     expect(optionsFor('.ride-name, [data-private-text]')).toMatchObject({
-      maskAllInputs: true,
+      ...FIELDS,
       maskTextSelector: `${MASK}, .ride-name, [data-private-text]`,
     });
     expect(maskTextSelectorFor(false)).toBe(MASK);
@@ -408,5 +412,59 @@ describe('RemoteSink.discard', () => {
     expect(sink.pending()).toHaveLength(0);
     expect(stop).toHaveBeenCalled();
     expect(localStorage.getItem('recap-remote-anon')).toBeNull();
+  });
+});
+
+describe('RemoteSink.track', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  function sent(calls: Call[]): { type: string; data: Record<string, unknown> }[] {
+    return calls
+      .filter((c) => c.url.endsWith('recap_ingest'))
+      .flatMap((c) => (c.body.payload['events'] as { type: string; data: Record<string, unknown> }[]) ?? [])
+      .filter((e) => e.type === 'custom');
+  }
+
+  it("keeps the event's name, whatever the properties say", async () => {
+    const { fn, calls } = fakeFetch();
+    const sink = new RemoteSink(config, fn);
+    sink.start();
+    sink.track('checkout_completed', { name: 'Jane Doe', items: 3 });
+    await sink.flush();
+    sink.stop();
+    expect(sent(calls)).toEqual([expect.objectContaining({ data: { name: 'checkout_completed', items: 3 } })]);
+  });
+
+  it('drops a call whose properties cannot be sent, and the rest of the session still goes', async () => {
+    const { fn, calls } = fakeFetch();
+    const sink = new RemoteSink(config, fn);
+    sink.start();
+    const loop: Record<string, unknown> = { a: 1 };
+    loop['self'] = loop;
+    sink.track('circular', loop);
+    sink.track('bigint', { n: BigInt(1) });
+    sink.track('too_big', { blob: 'x'.repeat(9000) });
+    sink.track('fine', { sku: 'A1' });
+    await sink.flush();
+    sink.track('later');
+    await sink.flush();
+    sink.stop();
+    expect(sent(calls).map((e) => e.data['name'])).toEqual(['fine', 'later']);
+    expect(sink.pending()).toHaveLength(0);
+  });
+
+  it('copies the properties when track() is called', async () => {
+    const { fn, calls } = fakeFetch();
+    const sink = new RemoteSink(config, fn);
+    sink.start();
+    const props = { step: 1 };
+    sink.track('step', props);
+    props.step = 2;
+    await sink.flush();
+    sink.stop();
+    expect(sent(calls)[0]!.data).toEqual({ name: 'step', step: 1 });
   });
 });

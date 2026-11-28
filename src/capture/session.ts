@@ -17,27 +17,62 @@ function generateUUID(): string {
 }
 
 let _sessionId: string | null = null;
+/** _sessionId is the one kept in sessionStorage (or storage is unavailable): no need to look again. */
+let _kept = false;
+/** Whether the id may be written to sessionStorage now. index.ts says no until consent is given. */
+let _mayKeep: () => boolean = () => true;
 let _sessionName: string | null = null;
 
+/**
+ * Decide when the session id may be kept in sessionStorage. Until `mayKeep()` says yes (with
+ * requireConsent, before Recap.optIn(); after Recap.optOut()), getSessionId() returns an id for
+ * this page only and writes nothing.
+ * @internal
+ */
+export function setSessionKeeping(mayKeep: (() => boolean) | null): void {
+  _mayKeep = mayKeep ?? (() => true);
+}
+
 export function getSessionId(): string {
-  if (_sessionId) return _sessionId;
+  if (_sessionId && _kept) return _sessionId;
+
+  if (!_mayKeep()) {
+    // Not allowed to keep anything yet: an id for this page only, never written to storage.
+    if (!_sessionId) _sessionId = generateUUID();
+    return _sessionId;
+  }
 
   try {
     const stored = sessionStorage.getItem(SESSION_KEY);
     if (stored) {
       _sessionId = stored;
-      return _sessionId;
+    } else {
+      if (!_sessionId) _sessionId = generateUUID();
+      sessionStorage.setItem(SESSION_KEY, _sessionId);
     }
-    _sessionId = generateUUID();
-    sessionStorage.setItem(SESSION_KEY, _sessionId);
   } catch {
     // sessionStorage unavailable (e.g. some private browsing modes)
     // Generate a per-page-load UUID — tracking works, just no cross-page linking
     console.warn('[Recap] sessionStorage unavailable — session ID will reset on each page load');
-    _sessionId = generateUUID();
+    if (!_sessionId) _sessionId = generateUUID();
   }
+  _kept = true;
 
   return _sessionId;
+}
+
+/**
+ * Forget this tab's session id (the visitor opted out): the next getSessionId() makes a new one,
+ * so a later opt-in starts a new session instead of continuing the old one.
+ */
+export function resetSessionId(): void {
+  _sessionId = null;
+  _kept = false;
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch {
+    // storage blocked: nothing was kept
+  }
 }
 
 export function setSessionName(name: string): void {

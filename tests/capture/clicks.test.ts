@@ -16,6 +16,19 @@ describe('generateSelector', () => {
     expect(generateSelector(el)).toBe('#main-header');
   });
 
+  it('leaves out ids with an @ or three digits in a row, which may be personal or record numbers', () => {
+    document.body.innerHTML = `
+      <div id="order-12345"><ul><li><button id="user-jane@x.com" class="del">Delete</button></li></ul></div>
+      <section id="checkout"><button id="row-678" data-ut-label="Remove">x</button></section>
+      <button id="step-10">Next</button>`;
+    const del = generateSelector(document.querySelector('.del')!);
+    expect(del).not.toContain('12345');
+    expect(del).not.toContain('jane');
+    expect(del).toBe('div > ul > li > button');
+    expect(generateSelector(document.querySelector('[data-ut-label]')!)).toBe('[data-ut-label="Remove"]');
+    expect(generateSelector(document.querySelector('#step-10')!)).toBe('#step-10');
+  });
+
   it('returns [data-ut-label] when element has that attribute', () => {
     const el = document.createElement('button');
     el.setAttribute('data-ut-label', 'Submit assessment');

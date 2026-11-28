@@ -13,6 +13,16 @@ const OWN_PACKAGE = /(^|\/)recap-ux(@[^/]*)?\/?$/i;
 /** rrweb's recorder, built next to recap.min.js. */
 const RRWEB_FILE = 'recap-rrweb.min.js';
 
+/** Set by the script-tag build (vite.config.ts): the sha384 hash of the recap-rrweb.min.js built with it. */
+declare const __RECAP_RRWEB_INTEGRITY__: string | undefined;
+
+/**
+ * Subresource integrity for Recap's own recap-rrweb.min.js, so a changed file next to recap.min.js
+ * is refused instead of run. Empty outside the script-tag build (tests, module builds).
+ */
+export const RRWEB_INTEGRITY: string =
+  typeof __RECAP_RRWEB_INTEGRITY__ === 'string' ? __RECAP_RRWEB_INTEGRITY__ : '';
+
 /**
  * Whether a script tag loads Recap: it has a data-recap attribute, or its file is one of Recap's
  * own. Other scripts with "recap" in their address (Google's recaptcha__en.js) don't count, and
@@ -148,7 +158,7 @@ export function autoInit(doc: Document = document): void {
   const config = script ? readScriptConfig(script) : {};
   setScriptDefaults(config);
   // Captured now: document.currentScript is only set while this script first runs.
-  setDefaultRrwebSrc(rrwebNextTo(script));
+  setDefaultRrwebSrc(rrwebNextTo(script), RRWEB_INTEGRITY || null);
   if (script?.dataset['autoInit'] === 'false') return;
   if (doc.readyState === 'loading') {
     doc.addEventListener('DOMContentLoaded', () => Recap.init(), { once: true });

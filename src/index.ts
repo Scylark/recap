@@ -4,7 +4,7 @@
 // build (dist/recap.min.js, built from src/browser.ts) starts itself from the tag's data-* attributes.
 
 import type { RecapConfig, AnyEvent } from './types.js';
-import { getSessionId, setSessionName } from './capture/session.js';
+import { getSessionId, resetSessionId, setSessionKeeping, setSessionName } from './capture/session.js';
 import { initClickCapture } from './capture/clicks.js';
 import { initScrollCapture, refreshScrollCapture } from './capture/scroll.js';
 import { initNavigationCapture, emitCurrentPage } from './capture/navigation.js';
@@ -15,7 +15,7 @@ import { openPanel, closePanel, isPanelOpen } from './viz/panel.js';
 import { initTouchTrigger, type TouchTriggerOptions } from './capture/touch-trigger.js';
 import { summarize } from './analysis/summarize.js';
 import { exportJSON, exportCSV, exportSummaryJSON } from './storage/export.js';
-import { RemoteSink, type RemoteConfig } from './remote/remote.js';
+import { RemoteSink, forgetRemoteSession, type RemoteConfig } from './remote/remote.js';
 import { setLabelMode, setScreenNamer } from './privacy/sanitize.js';
 import {
   gpcOn,
@@ -75,6 +75,18 @@ function consent(): Consent {
   }
   return _consent;
 }
+
+/**
+ * Whether Recap may keep anything in this browser yet (the session id, the local copy in
+ * IndexedDB): not after an opt-out, and with requireConsent not until the visitor opts in.
+ */
+function mayKeep(): boolean {
+  const c = consent();
+  return c !== 'denied' && !(_config.requireConsent === true && c !== 'granted');
+}
+
+// The session id is only written to sessionStorage once mayKeep() says so.
+setSessionKeeping(mayKeep);
 
 function saveConsent(value: 'granted' | 'denied'): void {
   _consent = value;
@@ -393,6 +405,7 @@ export const Recap = {
     _secretKey = null;
     _sawExcludedPath = false;
     _loggedReason = null;
+    _purged = false;
     setScreenNamer(null);
     setLabelMode('text');
     _initialized = false;
@@ -402,17 +415,24 @@ export const Recap = {
 
 // --- Consent ---
 
-/** Stop recording and sending, and delete everything not yet sent and the copy kept in this browser. */
+/**
+ * Stop recording and sending, and delete everything not yet sent and the copy kept in this browser.
+ * This tab's session is forgotten too, so a later opt-in starts a new one.
+ */
 function stopAfterOptOut(): void {
   _remote?.discard();
   _remote = null;
   _early = [];
+  _unsampled = false; // a new session after an opt-in is sampled afresh
+  forgetRemoteSession();
+  resetSessionId();
   clearBuffer();
   void deleteLocalData();
 }
 
 function resumeAfterOptIn(wasRecording: boolean): void {
   if (!_capturing) return;
+  purgeOnce();
   connectIfAllowed();
   // Start the session on the page they're on, since nothing was recorded until now.
   if (!wasRecording && allowed()) emitCurrentPage();
@@ -442,11 +462,21 @@ export function setScriptDefaults(config: RecapConfig): void {
 
 // --- Capture ---
 
+let _purged = false;
+
+/** Remove sessions older than the retention period, once per page load, when storage is allowed. */
+function purgeOnce(): void {
+  if (_purged || !mayKeep()) return;
+  _purged = true;
+  void purgeOldSessions();
+}
+
 function startCapture(config: RecapConfig): void {
   const strip = config.stripQueryParams !== false; // default true
 
-  // Purge old sessions (not for a visitor who opted out: that would recreate the deleted database)
-  if (consent() !== 'denied') void purgeOldSessions();
+  // Purge old sessions. Not for a visitor who opted out (that would recreate the deleted database),
+  // nor before consent with requireConsent: IndexedDB isn't opened until then.
+  purgeOnce();
 
   // Set up event buffer → IDB + optional beacon
   const stopBuffer = initBuffer(async (events: AnyEvent[]) => {

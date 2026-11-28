@@ -11,22 +11,40 @@ function generateUUID() {
   });
 }
 let _sessionId = null;
+let _kept = false;
+let _mayKeep = () => true;
 let _sessionName = null;
+function setSessionKeeping(mayKeep2) {
+  _mayKeep = mayKeep2 ?? (() => true);
+}
 function getSessionId() {
-  if (_sessionId) return _sessionId;
+  if (_sessionId && _kept) return _sessionId;
+  if (!_mayKeep()) {
+    if (!_sessionId) _sessionId = generateUUID();
+    return _sessionId;
+  }
   try {
     const stored = sessionStorage.getItem(SESSION_KEY);
     if (stored) {
       _sessionId = stored;
-      return _sessionId;
+    } else {
+      if (!_sessionId) _sessionId = generateUUID();
+      sessionStorage.setItem(SESSION_KEY, _sessionId);
     }
-    _sessionId = generateUUID();
-    sessionStorage.setItem(SESSION_KEY, _sessionId);
   } catch {
     console.warn("[Recap] sessionStorage unavailable — session ID will reset on each page load");
-    _sessionId = generateUUID();
+    if (!_sessionId) _sessionId = generateUUID();
   }
+  _kept = true;
   return _sessionId;
+}
+function resetSessionId() {
+  _sessionId = null;
+  _kept = false;
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch {
+  }
 }
 function setSessionName(name) {
   _sessionName = name;
@@ -125,7 +143,7 @@ function extractLabel(el, mode = _labelMode) {
   if (mode === "none" || isMasked(el)) return null;
   const ariaLabel = el.getAttribute("aria-label");
   if (ariaLabel?.trim()) return ariaLabel.trim();
-  const labelledBy = el.getAttribute("aria-labelledby");
+  const labelledBy = mode === "text" ? el.getAttribute("aria-labelledby") : null;
   if (labelledBy) {
     const parts = labelledBy.split(/\s+/).map((id) => id ? document.getElementById(id) : null).filter((ref) => !!ref && !isMasked(ref) && !isExcluded(ref)).map((ref) => textOf(ref)).filter(Boolean);
     if (parts.length) return parts.join(" ").slice(0, 80);
@@ -178,19 +196,22 @@ function nearestHeading(el) {
   }
   return null;
 }
+function usableId(id) {
+  return id !== "" && !id.includes("@") && !/\d{3}/.test(id);
+}
 function cssEscape(value) {
   if (typeof CSS !== "undefined" && CSS.escape) return CSS.escape(value);
   return value.replace(/([^\w-])/g, "\\$1").replace(/^(\d)/, "\\3$1 ");
 }
 function generateSelector(el) {
-  if (el.id) return `#${cssEscape(el.id)}`;
+  if (usableId(el.id)) return `#${cssEscape(el.id)}`;
   const utLabel = el.getAttribute("data-ut-label");
   if (utLabel) return `[data-ut-label="${utLabel.replace(/"/g, '\\"')}"]`;
   const segments = [];
   let current = el;
   while (current && current !== document.body && segments.length < 5) {
     const tag = current.tagName.toLowerCase();
-    if (current.id && current !== el) {
+    if (current !== el && usableId(current.id)) {
       segments.push(`#${cssEscape(current.id)}`);
       break;
     }
@@ -1850,6 +1871,9 @@ function eventsInVisit(events, visit) {
     (e) => e.url === visit.pagePath && e.timestamp >= visit.visitStartMs && (visit.visitEndMs === null || e.timestamp < visit.visitEndMs)
   );
 }
+function escapeHtml(text) {
+  return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
 const PREFIX$1 = "recap-panel";
 const TAG_CONFIG = {
   backtrack: { bg: "#451a03", color: "#fdba74" },
@@ -1889,7 +1913,7 @@ function renderRow(visit, index) {
       class="${PREFIX$1}-tl-row"
     >
       <span style="font-family:ui-monospace,monospace;font-size:11px;color:var(--muted-foreground);min-width:36px;flex-shrink:0">${formatArrival(visit.arrivalTime)}</span>
-      <span style="font-size:12px;color:var(--foreground);font-family:ui-monospace,monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${visit.pagePath}</span>
+      <span style="font-size:12px;color:var(--foreground);font-family:ui-monospace,monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(visit.pagePath)}</span>
       ${visitMeta}
       <span style="font-size:11px;${durationStyle};flex-shrink:0;min-width:72px;text-align:right">${formatDuration$1(visit.duration)}</span>
       <span style="display:flex;flex-wrap:wrap;gap:2px;flex-shrink:0">${tags}</span>
@@ -2719,7 +2743,7 @@ function render(root, sessions) {
         </option>`
   ).join("");
   const filterBar = _heatmapFilter ? `<div class="${PREFIX}-filter-bar">
-         <span>Showing: <strong>${_heatmapFilter.pagePath}</strong>${_heatmapFilter.label ? ` — ${_heatmapFilter.label}` : ""}</span>
+         <span>Showing: <strong>${escapeHtml(_heatmapFilter.pagePath)}</strong>${_heatmapFilter.label ? ` — ${escapeHtml(_heatmapFilter.label)}` : ""}</span>
          <button class="${PREFIX}-filter-clear" id="${PREFIX}-btn-clear-filter">× clear</button>
        </div>` : "";
   const heatmapTabContent = `
@@ -3192,17 +3216,223 @@ function secretKeyMessage(kind) {
   const name = kind === "service_role" ? "the service_role key" : "a secret key (sb_secret_…)";
   return `[Recap] Not starting: the Supabase key given is ${name}. It gives full access to your database and must never be in a web page, so Recap sends nothing. Use the anon or publishable key (Supabase: Project Settings, API keys), and rotate this secret key now: anyone who loaded the page can read it.`;
 }
-const REMOTE_SDK_VERSION = "web-0.3.0";
+const URL_ATTRS = /* @__PURE__ */ new Set(["href", "src", "xlink:href", "background", "poster", "data", "action", "formaction"]);
+const RESOLVE_ATTRS = /* @__PURE__ */ new Set(["action", "formaction", "poster"]);
+const SECRET_META = /csrf|xsrf|token|nonce|secret|api[-_]?key/i;
+const CSS_URL = /url\((?:(')([^']*)'|(")([^"]*)"|([^)]*))\)/gi;
+const ABSOLUTE = /^(https?:)?\/\//i;
+const IMAGE_OPTIMISERS = {
+  "/_next/image": { image: "url", others: ["w", "q"] },
+  "/_image": { image: "href", others: ["w", "h", "q", "f"] }
+};
+function keepsImageQuery(u) {
+  const known = IMAGE_OPTIMISERS[u.pathname];
+  if (!known || !u.searchParams.has(known.image)) return false;
+  for (const [k, v] of u.searchParams) {
+    if (k === known.image) {
+      if (!v.startsWith("/") || v.startsWith("//") || /[?#]/.test(v)) return false;
+    } else if (!known.others.includes(k) || !/^[\w.-]*$/.test(v)) {
+      return false;
+    }
+  }
+  return true;
+}
+function isSecretMeta(attrs) {
+  return ["name", "property", "itemprop"].some((k) => typeof attrs[k] === "string" && SECRET_META.test(attrs[k]));
+}
+class DomCleaner {
+  constructor(keepQuery) {
+    this.keepQuery = keepQuery;
+    this.secretMetaIds = /* @__PURE__ */ new Set();
+  }
+  /** An rrweb event as it may be stored. Unchanged parts are shared, never copied. */
+  clean(e) {
+    const data = e["data"];
+    if (!data || typeof data !== "object") return e;
+    switch (e.type) {
+      case 4: {
+        if (typeof data["href"] !== "string") return e;
+        return { ...e, data: { ...data, href: sanitizeHref(data["href"], !this.keepQuery) } };
+      }
+      case 2: {
+        this.secretMetaIds.clear();
+        const node = data["node"];
+        if (!node || typeof node !== "object") return e;
+        const cleaned = this.node(node);
+        return cleaned === node ? e : { ...e, data: { ...data, node: cleaned } };
+      }
+      case 3: {
+        if (data["source"] !== 0) return e;
+        const out = {};
+        const adds = data["adds"];
+        if (Array.isArray(adds)) {
+          const next = this.list(adds, (a) => {
+            if (!a || typeof a !== "object" || !a.node) return a;
+            const node = this.node(a.node);
+            return node === a.node ? a : { ...a, node };
+          });
+          if (next !== adds) out["adds"] = next;
+        }
+        const attributes = data["attributes"];
+        if (Array.isArray(attributes)) {
+          const next = this.list(attributes, (m) => {
+            if (!m || typeof m !== "object" || !m.attributes || typeof m.attributes !== "object") return m;
+            let attrs = this.attrs(m.attributes);
+            if (typeof m.id === "number" && this.secretMetaIds.has(m.id) && typeof attrs["content"] === "string") {
+              attrs = { ...attrs, content: "" };
+            }
+            return attrs === m.attributes ? m : { ...m, attributes: attrs };
+          });
+          if (next !== attributes) out["attributes"] = next;
+        }
+        return Object.keys(out).length ? { ...e, data: { ...data, ...out } } : e;
+      }
+      default:
+        return e;
+    }
+  }
+  /** `items` with `fn` applied, or the same array when nothing changed. */
+  list(items, fn) {
+    let out = null;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const next = fn(item);
+      if (next !== item) (out ?? (out = items.slice()))[i] = next;
+    }
+    return out ?? items;
+  }
+  node(n) {
+    let changed = null;
+    if (n.type === 2 && n.attributes && typeof n.attributes === "object") {
+      let attrs = this.attrs(n.attributes);
+      if (n.tagName === "meta" && isSecretMeta(n.attributes)) {
+        if (typeof n.id === "number") this.secretMetaIds.add(n.id);
+        if (typeof attrs["content"] === "string" && attrs["content"]) attrs = { ...attrs, content: "" };
+      }
+      if (attrs !== n.attributes) changed = { attributes: attrs };
+    }
+    if (n.type === 3 && n.isStyle && typeof n.textContent === "string") {
+      const text = this.css(n.textContent);
+      if (text !== n.textContent) changed = { ...changed, textContent: text };
+    }
+    if (Array.isArray(n.childNodes)) {
+      const kids = this.list(n.childNodes, (c) => c && typeof c === "object" ? this.node(c) : c);
+      if (kids !== n.childNodes) changed = { ...changed, childNodes: kids };
+    }
+    return changed ? { ...n, ...changed } : n;
+  }
+  attrs(attrs) {
+    let out = null;
+    for (const [key, value] of Object.entries(attrs)) {
+      const name = key.toLowerCase();
+      let next = value;
+      if (typeof value === "string" && value) {
+        if (name === "srcset") next = this.srcset(value);
+        else if (name === "style" || name === "_csstext") next = this.css(value);
+        else if (URL_ATTRS.has(name)) next = this.url(value, RESOLVE_ATTRS.has(name));
+      } else if (name === "style" && value && typeof value === "object") {
+        next = this.styleChange(value);
+      }
+      if (next !== value) (out ?? (out = { ...attrs }))[key] = next;
+    }
+    return out ?? attrs;
+  }
+  styleChange(style) {
+    let out = null;
+    for (const [prop, v] of Object.entries(style)) {
+      let next = v;
+      if (typeof v === "string") next = this.css(v);
+      else if (Array.isArray(v) && typeof v[0] === "string") {
+        const css = this.css(v[0]);
+        if (css !== v[0]) next = [css, ...v.slice(1)];
+      }
+      if (next !== v) (out ?? (out = { ...style }))[prop] = next;
+    }
+    return out ?? style;
+  }
+  /**
+   * A same-origin http(s) address without its hash and (unless kept) its query string. Anything
+   * else (other sites, data:, blob:, javascript:, relative values rrweb kept on purpose) is unchanged.
+   */
+  url(value, resolveRelative = false) {
+    const v = value.trim();
+    if (!v || !resolveRelative && !ABSOLUTE.test(v)) return value;
+    if (typeof location === "undefined") return value;
+    let u;
+    try {
+      u = new URL(v, location.href);
+    } catch {
+      return value;
+    }
+    if (u.protocol !== "http:" && u.protocol !== "https:" || u.origin !== location.origin) return value;
+    if (!u.search && !u.hash) return value;
+    const query = this.keepQuery || keepsImageQuery(u) ? u.search : "";
+    return u.origin + u.pathname + query;
+  }
+  srcset(value) {
+    const parts = value.split(/,\s+/);
+    let changed = false;
+    const out = parts.map((part) => {
+      const m = /^(\s*)(\S+)(.*)$/s.exec(part);
+      if (!m) return part;
+      const url = this.url(m[2]);
+      if (url === m[2]) return part;
+      changed = true;
+      return `${m[1]}${url}${m[3]}`;
+    });
+    return changed ? out.join(", ") : value;
+  }
+  css(text) {
+    if (!/url\(/i.test(text)) return text;
+    return text.replace(CSS_URL, (whole, q1, p1, q2, p2, p3) => {
+      const raw = p1 ?? p2 ?? p3 ?? "";
+      const quote = q1 ?? q2 ?? "";
+      const url = this.url(raw.trim());
+      return url === raw.trim() ? whole : `url(${quote}${url}${quote})`;
+    });
+  }
+}
+const REMOTE_SDK_VERSION = "web-0.3.1";
+const EDITABLE_SELECTOR = '[contenteditable]:not([contenteditable="false"]), [role="textbox"]';
+const MASK_INPUT_OPTIONS = {
+  color: true,
+  date: true,
+  "datetime-local": true,
+  email: true,
+  month: true,
+  number: true,
+  range: true,
+  search: true,
+  tel: true,
+  text: true,
+  time: true,
+  url: true,
+  week: true,
+  textarea: true,
+  select: true,
+  password: true,
+  hidden: true,
+  file: true
+};
 function maskTextSelectorFor(maskText) {
   if (maskText === true) return "*";
   const extra = typeof maskText === "string" ? maskText.trim() : "";
-  return extra ? `${MASK_SELECTOR}, ${extra}` : MASK_SELECTOR;
+  return [MASK_SELECTOR, EDITABLE_SELECTOR, extra].filter(Boolean).join(", ");
+}
+function isValidSelector(selector) {
+  try {
+    document.createDocumentFragment().querySelector(selector);
+    return true;
+  } catch {
+    return false;
+  }
 }
 function canvasFps(canvas) {
   if (canvas === true) return 2;
   return typeof canvas === "number" && Number.isFinite(canvas) && canvas > 0 ? canvas : 0;
 }
 let _defaultRrwebSrc = null;
+let _defaultRrwebIntegrity = null;
 const _loads = /* @__PURE__ */ new Map();
 function loadScript(src, integrity) {
   const known = _loads.get(src);
@@ -3233,10 +3463,15 @@ function loadScript(src, integrity) {
 function pageRecord() {
   return globalThis.rrweb?.record;
 }
+function ownRecord() {
+  return globalThis.RecapRrweb?.record;
+}
 const KEY_START = "recap-remote-start";
 const KEY_UPLOADED = "recap-remote-uploaded";
 const KEY_SAMPLED = "recap-remote-sampled";
 const KEY_ANON = "recap-remote-anon";
+const KEY_REC = "recap-remote-rec";
+const MAX_PROPS_BYTES = 8 * 1024;
 const MILESTONES = [25, 50, 75, 100];
 const MAX_BATCH = 200;
 const KEEPALIVE_LIMIT = 6e4;
@@ -3284,6 +3519,38 @@ function browserInfo() {
   const os = /iPhone|iPad/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Mac OS X/.test(ua) ? "macOS" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : null;
   return { model, os };
 }
+function forgetRemoteSession() {
+  for (const key of [KEY_START, KEY_UPLOADED, KEY_SAMPLED, KEY_REC]) {
+    try {
+      sessionStorage.removeItem(key);
+    } catch {
+    }
+  }
+  try {
+    localStorage.removeItem(KEY_ANON);
+  } catch {
+  }
+}
+function recordingSelectors(o) {
+  const own = [
+    ["recordings.blockSelector", o.blockSelector],
+    ["recordings.maskText (data-mask-text)", typeof o.maskText === "string" ? o.maskText : void 0]
+  ];
+  for (const [option, value] of own) {
+    if (value === void 0 || value === null) continue;
+    if (typeof value !== "string" || value.trim() && !isValidSelector(value)) {
+      console.error(`[Recap] recordings are off for this page: ${option} is not a valid CSS selector: ${String(value)}`);
+      return null;
+    }
+  }
+  const block = [EXCLUDE_SELECTOR, o.blockSelector?.trim()].filter(Boolean).join(", ");
+  const mask = maskTextSelectorFor(o.maskText);
+  if (!isValidSelector(block) || !isValidSelector(mask)) {
+    console.error("[Recap] recordings are off for this page: this browser does not accept the privacy selectors");
+    return null;
+  }
+  return { block, mask };
+}
 class RemoteSink {
   constructor(config, fetchFn = (...a) => fetch(...a), opts = {}) {
     this.queue = [];
@@ -3305,6 +3572,7 @@ class RemoteSink {
     this.config = config;
     this.fetchFn = fetchFn;
     this.opts = opts;
+    this.cleaner = new DomCleaner(config.stripQueryParams === false);
     this.sessionId = getSessionId();
     const savedStart = Number(store("session", KEY_START));
     this.startMs = savedStart > 0 ? savedStart : Date.now();
@@ -3352,8 +3620,8 @@ class RemoteSink {
   }
   /**
    * The visitor opted out: stop at once and delete everything not yet sent (events and
-   * recording). The browser's random id is forgotten too, so a later opt-in can't be linked to
-   * earlier visits.
+   * recording). This tab's session and the browser's random id are forgotten too, so a later
+   * opt-in starts a new session that can't be linked to earlier visits.
    */
   discard() {
     this.active = false;
@@ -3363,10 +3631,7 @@ class RemoteSink {
     this.stopFns = [];
     this.endRecording("opted out: recording stopped");
     this.queue = [];
-    try {
-      localStorage.removeItem(KEY_ANON);
-    } catch {
-    }
+    forgetRemoteSession();
   }
   getSessionId() {
     return this.sessionId;
@@ -3428,10 +3693,29 @@ class RemoteSink {
         return;
     }
   }
-  /** A custom event, e.g. track('added_to_basket', { sku: 'A1' }). */
+  /**
+   * A custom event, e.g. track('added_to_basket', { sku: 'A1' }). The properties are copied as JSON
+   * now: ones that can't be (circular, BigInt) or come to more than 8 KB drop the event, so one bad
+   * call can't hold up the rest of the session. A `name` property can't replace the event's name.
+   */
   track(name, props = {}) {
-    if (!this.sampled || !name) return;
-    this.push("custom", { name, ...props });
+    if (!this.sampled || typeof name !== "string" || !name) return;
+    let json;
+    try {
+      json = JSON.stringify(props ?? {});
+    } catch (err) {
+      this.log(`track('${name}') dropped: its properties can't be sent as JSON (circular, or a BigInt)`, err);
+      return;
+    }
+    const bytes = json === void 0 ? 0 : utf8Bytes(json);
+    if (bytes > MAX_PROPS_BYTES) {
+      this.log(`track('${name}') dropped: its properties are ${Math.ceil(bytes / 1024)} KB as JSON, over the 8 KB limit`);
+      return;
+    }
+    const copy = json === void 0 ? null : JSON.parse(json);
+    const data = copy && typeof copy === "object" && !Array.isArray(copy) ? copy : {};
+    if ("name" in data) this.log(`track('${name}'): its name property was left out; it can't replace the event name`);
+    this.push("custom", { ...data, name });
   }
   pending() {
     return this.queue;
@@ -3564,32 +3848,34 @@ class RemoteSink {
       const opt = this.config.recordings;
       if (!opt || this.recordingBlocked) return;
       const o = opt === true ? {} : opt;
-      const key = "recap-remote-rec";
-      const saved = store("session", key);
+      const selectors = recordingSelectors(o);
+      if (!selectors) return;
+      const saved = store("session", KEY_REC);
       const on = this.opts.recordIn === true || (saved !== null ? saved === "1" : Math.random() < (o.sampleRate ?? 1));
-      store("session", key, on ? "1" : "0");
+      store("session", KEY_REC, on ? "1" : "0");
       if (!on) {
         this.log("recordings: this tab is not in the recorded share (recordings.sampleRate)");
         return;
       }
-      const record = o.record ?? pageRecord();
+      const record = o.record ?? (o.useGlobalRrweb === true ? pageRecord() : void 0);
       if (record) {
-        this.beginRecording(record, o);
+        this.beginRecording(record, o, selectors);
         return;
       }
       const src = o.src ?? _defaultRrwebSrc;
       if (!src) {
         this.log(
-          "recordings are on but rrweb isn't loaded: pass recordings.record (import { record } from 'rrweb'), or recordings.src with the address of recap-rrweb.min.js"
+          "recordings are on but rrweb isn't loaded: pass recordings.record (import { record } from 'rrweb'), recordings.src with the address of recap-rrweb.min.js, or useGlobalRrweb: true to use rrweb already on the page"
         );
         return;
       }
-      this.log(`loading the recorder from ${src}`);
-      loadScript(src, o.integrity).then(
+      const integrity = o.integrity ?? (o.src ? void 0 : _defaultRrwebIntegrity ?? void 0);
+      this.log(`loading the recorder from ${src}${integrity ? " (integrity checked)" : ""}`);
+      loadScript(src, integrity).then(
         () => {
           if (!this.active || this.recordingBlocked || this.recordFn) return;
-          const loaded = pageRecord();
-          if (loaded) this.beginRecording(loaded, o);
+          const loaded = ownRecord() ?? pageRecord();
+          if (loaded) this.beginRecording(loaded, o, selectors);
           else this.log(`recordings are off for this page: ${src} loaded but did not set window.rrweb.record`);
         },
         (err) => this.log(
@@ -3601,18 +3887,19 @@ class RemoteSink {
       this.log("recordings are off for this page: could not start the recorder", err);
     }
   }
-  beginRecording(record, o) {
-    const block = [EXCLUDE_SELECTOR, o.blockSelector].filter(Boolean).join(", ");
+  beginRecording(record, o, selectors) {
     const fps = canvasFps(o.canvas);
     this.recordFn = record;
     let stop;
     try {
       stop = record({
         emit: (e) => this.pushDom(e),
-        maskAllInputs: true,
-        blockSelector: block,
-        // Text is replaced with * (same length, so the layout stays): the mask marker always, plus maskText.
-        maskTextSelector: maskTextSelectorFor(o.maskText),
+        // Every field whose value is text, hidden fields included (not maskAllInputs, which skips them).
+        maskInputOptions: { ...MASK_INPUT_OPTIONS },
+        blockSelector: selectors.block,
+        // Text is replaced with * (same length, so the layout stays): the mask marker and editable
+        // regions always, plus maskText.
+        maskTextSelector: selectors.mask,
         inlineStylesheet: true,
         recordCanvas: fps > 0,
         collectFonts: false,
@@ -3644,7 +3931,14 @@ class RemoteSink {
   }
   pushDom(event) {
     if (!this.recordFn || this.recordingBlocked) return;
-    const e = this.cleanDom(event);
+    let e;
+    try {
+      e = this.cleaner.clean(event);
+    } catch (err) {
+      this.endRecording("recordings are off for this session: an event could not be cleaned");
+      this.log("clean error", err);
+      return;
+    }
     const n = utf8Bytes(JSON.stringify(e));
     if (e.type === 2) {
       this.log(`full snapshot: ${Math.round(n / 1e3)} KB`);
@@ -3672,18 +3966,6 @@ class RemoteSink {
       return;
     }
     if (this.domBytes >= DOM_CHUNK_BYTES && this.uploaded) void this.sendDom();
-  }
-  /**
-   * An rrweb event as it may be stored. Meta events carry the page address: keep its origin and
-   * path (the Replayer needs an absolute address to load relative images and stylesheets) and drop
-   * the hash and, unless stripQueryParams is false, the query string, which can hold ids and
-   * tokens. Same rules as the addresses of page views, but without the screenName hook.
-   */
-  cleanDom(e) {
-    if (e.type !== 4) return e;
-    const data = e["data"];
-    if (!data || typeof data["href"] !== "string") return e;
-    return { ...e, data: { ...data, href: sanitizeHref(data["href"], this.config.stripQueryParams !== false) } };
   }
   /** The oldest buffered events, up to maxBytes. Always at least one, so a big snapshot goes alone. */
   takeDomChunk(maxBytes) {
@@ -3769,6 +4051,11 @@ function consent() {
   }
   return _consent;
 }
+function mayKeep() {
+  const c = consent();
+  return c !== "denied" && !(_config.requireConsent === true && c !== "granted");
+}
+setSessionKeeping(mayKeep);
 function saveConsent(value) {
   _consent = value;
   try {
@@ -4037,6 +4324,7 @@ const Recap = {
     _secretKey = null;
     _sawExcludedPath = false;
     _loggedReason = null;
+    _purged = false;
     setScreenNamer(null);
     setLabelMode("text");
     _initialized = false;
@@ -4047,11 +4335,15 @@ function stopAfterOptOut() {
   _remote?.discard();
   _remote = null;
   _early = [];
+  _unsampled = false;
+  forgetRemoteSession();
+  resetSessionId();
   clearBuffer();
   void deleteLocalData();
 }
 function resumeAfterOptIn(wasRecording) {
   if (!_capturing) return;
+  purgeOnce();
   connectIfAllowed();
   if (!wasRecording && allowed()) emitCurrentPage();
 }
@@ -4066,9 +4358,15 @@ function onConsentChangedElsewhere(e) {
 function setScriptDefaults(config) {
   _scriptDefaults = given(config);
 }
+let _purged = false;
+function purgeOnce() {
+  if (_purged || !mayKeep()) return;
+  _purged = true;
+  void purgeOldSessions();
+}
 function startCapture(config) {
   const strip = config.stripQueryParams !== false;
-  if (consent() !== "denied") void purgeOldSessions();
+  purgeOnce();
   const stopBuffer = initBuffer(async (events) => {
     await saveEvents(events);
     if (hasEndpoint()) await sendBeaconBatch(events);

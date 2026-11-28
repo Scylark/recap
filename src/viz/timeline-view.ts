@@ -4,6 +4,7 @@
 import type { AnyEvent } from '../types.js';
 import { generateTimeline, type PageVisit, type PageVisitTag } from '../analysis/timeline.js';
 import { getSessionId } from '../capture/session.js';
+import { escapeHtml } from './escape.js';
 
 const PREFIX = 'recap-panel';
 
@@ -59,7 +60,7 @@ function renderRow(visit: PageVisit, index: number): string {
       class="${PREFIX}-tl-row"
     >
       <span style="font-family:ui-monospace,monospace;font-size:11px;color:var(--muted-foreground);min-width:36px;flex-shrink:0">${formatArrival(visit.arrivalTime)}</span>
-      <span style="font-size:12px;color:var(--foreground);font-family:ui-monospace,monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${visit.pagePath}</span>
+      <span style="font-size:12px;color:var(--foreground);font-family:ui-monospace,monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(visit.pagePath)}</span>
       ${visitMeta}
       <span style="font-size:11px;${durationStyle};flex-shrink:0;min-width:72px;text-align:right">${formatDuration(visit.duration)}</span>
       <span style="display:flex;flex-wrap:wrap;gap:2px;flex-shrink:0">${tags}</span>

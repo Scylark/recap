@@ -7,16 +7,62 @@
 
 import type { AnyEvent } from '../types.js';
 import { getSessionId } from '../capture/session.js';
-import { EXCLUDE_SELECTOR, MASK_SELECTOR, sanitizeHref } from '../privacy/sanitize.js';
+import { EXCLUDE_SELECTOR, MASK_SELECTOR } from '../privacy/sanitize.js';
 import { secretKeyKind, secretKeyMessage } from '../gate.js';
+import { DomCleaner } from './clean-dom.js';
 
-export const REMOTE_SDK_VERSION = 'web-0.3.0';
+export const REMOTE_SDK_VERSION = 'web-0.3.1';
 
-/** The rrweb maskTextSelector for a recordings.maskText setting. The mask marker is always masked. */
+/**
+ * Places people type that aren't form fields: contenteditable regions (chat boxes, rich-text
+ * editors) and custom text boxes. Their text is always masked in recordings, like form fields.
+ */
+export const EDITABLE_SELECTOR = '[contenteditable]:not([contenteditable="false"]), [role="textbox"]';
+
+/**
+ * rrweb's maskInputOptions: every kind of field whose value is text, including hidden fields (CSRF
+ * tokens) and file pickers (the file name). The same list as rrweb's maskAllInputs, plus hidden
+ * and file. Checkboxes and radio buttons keep their ticked state.
+ */
+export const MASK_INPUT_OPTIONS: Readonly<Record<string, true>> = {
+  color: true,
+  date: true,
+  'datetime-local': true,
+  email: true,
+  month: true,
+  number: true,
+  range: true,
+  search: true,
+  tel: true,
+  text: true,
+  time: true,
+  url: true,
+  week: true,
+  textarea: true,
+  select: true,
+  password: true,
+  hidden: true,
+  file: true,
+};
+
+/**
+ * The rrweb maskTextSelector for a recordings.maskText setting. The mask marker and editable
+ * regions are always masked.
+ */
 export function maskTextSelectorFor(maskText: boolean | string | undefined): string {
   if (maskText === true) return '*';
   const extra = typeof maskText === 'string' ? maskText.trim() : '';
-  return extra ? `${MASK_SELECTOR}, ${extra}` : MASK_SELECTOR;
+  return [MASK_SELECTOR, EDITABLE_SELECTOR, extra].filter(Boolean).join(', ');
+}
+
+/** Whether the browser accepts `selector` as a CSS selector list. */
+export function isValidSelector(selector: string): boolean {
+  try {
+    document.createDocumentFragment().querySelector(selector);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Canvas frames per second for a recordings.canvas setting: 2 for true, the number given, or 0 (off). */
@@ -28,14 +74,17 @@ export function canvasFps(canvas: boolean | number | undefined): number {
 // ---------------------------------------------------------------- loading rrweb on demand
 
 let _defaultRrwebSrc: string | null = null;
+let _defaultRrwebIntegrity: string | null = null;
 
 /**
- * Where to load recap-rrweb.min.js from when recordings.src isn't set. The script-tag build sets it
- * to the folder recap.min.js was loaded from.
+ * Where to load recap-rrweb.min.js from when recordings.src isn't set, and its subresource
+ * integrity hash. The script-tag build sets them to the folder recap.min.js was loaded from and the
+ * hash of the recap-rrweb.min.js built with it.
  * @internal
  */
-export function setDefaultRrwebSrc(src: string | null): void {
+export function setDefaultRrwebSrc(src: string | null, integrity: string | null = null): void {
   _defaultRrwebSrc = src;
+  _defaultRrwebIntegrity = integrity || null;
 }
 
 const _loads = new Map<string, Promise<void>>();
@@ -72,8 +121,14 @@ export function loadScript(src: string, integrity?: string): Promise<void> {
   return p;
 }
 
+/** window.rrweb.record: rrweb loaded by the page itself (or by an older recap-rrweb.min.js). */
 function pageRecord(): RrwebRecord | undefined {
   return (globalThis as unknown as { rrweb?: { record?: RrwebRecord } }).rrweb?.record;
+}
+
+/** The recorder recap-rrweb.min.js sets up: window.RecapRrweb.record. */
+function ownRecord(): RrwebRecord | undefined {
+  return (globalThis as unknown as { RecapRrweb?: { record?: RrwebRecord } }).RecapRrweb?.record;
 }
 
 /** rrweb's `record` function. Pass `import { record } from 'rrweb'`, or load rrweb with a script tag. */
@@ -94,16 +149,26 @@ export interface RrwebEvent {
 export interface RemoteRecordingOptions {
   /**
    * rrweb's record function (`import { record } from 'rrweb'`, version 2.2.2). Without it Recap
-   * uses `window.rrweb.record` if rrweb is on the page, or else loads recap-rrweb.min.js from `src`.
+   * loads recap-rrweb.min.js from `src` (or uses `window.rrweb.record` with `useGlobalRrweb`).
    */
   record?: RrwebRecord;
+  /**
+   * Use `window.rrweb.record` when the page already has rrweb, instead of loading Recap's own
+   * recorder. Only for an rrweb 2.2.2 you load yourself: another version may not mask the same way.
+   * Default false: rrweb already on the page is ignored.
+   */
+  useGlobalRrweb?: boolean;
   /**
    * Address of recap-rrweb.min.js (rrweb's recorder as a plain script), loaded only for tabs sampled
    * in for recordings and only when `record` isn't given. The script-tag build defaults to the folder
    * recap.min.js came from; module builds need this or `record`. Script tag: data-recordings-src.
    */
   src?: string;
-  /** Subresource integrity hash for `src`, e.g. "sha384-…". Script tag: data-recordings-integrity. */
+  /**
+   * Subresource integrity hash for `src`, e.g. "sha384-…". The script-tag build checks its own
+   * recap-rrweb.min.js (the one next to recap.min.js) against the hash it was built with; this
+   * replaces that. Script tag: data-recordings-integrity.
+   */
   integrity?: string;
   /** Share of tabs to record, 0 to 1. Default 1. Script tag: data-record-sample. */
   sampleRate?: number;
@@ -113,13 +178,17 @@ export interface RemoteRecordingOptions {
    * data-record-canvas.
    */
   canvas?: boolean | number;
-  /** Extra CSS selector for parts of the page never recorded. The privacy marker (`data-recap-private`, `.recap-private`) always is. */
+  /**
+   * Extra CSS selector for parts of the page never recorded. The privacy marker (`data-recap-private`,
+   * `.recap-private`) always is. If it isn't a valid selector, nothing is recorded (an error says why).
+   */
   blockSelector?: string;
   /**
    * Text to replace with `*` in recordings, keeping the layout: `true` for all text on the page, or
    * a CSS selector for the parts to mask (and everything inside them). Text inside the mask marker
-   * (`data-recap-mask`, `.recap-mask`) is always masked. Form fields are always masked, whatever
-   * this says. Default: only the mask marker.
+   * (`data-recap-mask`, `.recap-mask`) is always masked, and so is text in contenteditable regions
+   * and `role="textbox"`. Form fields are always masked, whatever this says. Default: only those.
+   * If the selector isn't valid, nothing is recorded (an error says why).
    */
   maskText?: boolean | string;
 }
@@ -170,6 +239,9 @@ const KEY_START = 'recap-remote-start';
 const KEY_UPLOADED = 'recap-remote-uploaded';
 const KEY_SAMPLED = 'recap-remote-sampled';
 const KEY_ANON = 'recap-remote-anon';
+const KEY_REC = 'recap-remote-rec';
+/** Custom event properties above this, as JSON, are not sent. */
+const MAX_PROPS_BYTES = 8 * 1024;
 const MILESTONES = [25, 50, 75, 100];
 const MAX_BATCH = 200;
 /**
@@ -258,6 +330,56 @@ function browserInfo(): { model: string | null; os: string | null } {
   return { model, os };
 }
 
+/**
+ * Forget this tab's dashboard session and the browser's random id (the visitor opted out), so a
+ * later opt-in starts a new session, sampled afresh, that can't be linked to this one.
+ */
+export function forgetRemoteSession(): void {
+  for (const key of [KEY_START, KEY_UPLOADED, KEY_SAMPLED, KEY_REC]) {
+    try {
+      sessionStorage.removeItem(key);
+    } catch {
+      // storage blocked: nothing was kept
+    }
+  }
+  try {
+    localStorage.removeItem(KEY_ANON);
+  } catch {
+    // storage blocked: nothing was kept
+  }
+}
+
+interface RecordingSelectors {
+  block: string;
+  mask: string;
+}
+
+/**
+ * rrweb's blockSelector and maskTextSelector for these options, or null (with an error in the
+ * console, debug or not) if the site's own selectors aren't valid CSS: rrweb would ignore the whole
+ * list, privacy markers included, so the page isn't recorded at all.
+ */
+function recordingSelectors(o: RemoteRecordingOptions): RecordingSelectors | null {
+  const own: Array<[string, unknown]> = [
+    ['recordings.blockSelector', o.blockSelector],
+    ['recordings.maskText (data-mask-text)', typeof o.maskText === 'string' ? o.maskText : undefined],
+  ];
+  for (const [option, value] of own) {
+    if (value === undefined || value === null) continue;
+    if (typeof value !== 'string' || (value.trim() && !isValidSelector(value))) {
+      console.error(`[Recap] recordings are off for this page: ${option} is not a valid CSS selector: ${String(value)}`);
+      return null;
+    }
+  }
+  const block = [EXCLUDE_SELECTOR, o.blockSelector?.trim()].filter(Boolean).join(', ');
+  const mask = maskTextSelectorFor(o.maskText);
+  if (!isValidSelector(block) || !isValidSelector(mask)) {
+    console.error('[Recap] recordings are off for this page: this browser does not accept the privacy selectors');
+    return null;
+  }
+  return { block, mask };
+}
+
 export class RemoteSink {
   private readonly config: RemoteConfig;
   private readonly fetchFn: FetchFn;
@@ -284,6 +406,7 @@ export class RemoteSink {
   /** Recording is off for the rest of this page load (it went to a path in excludePaths). */
   private recordingBlocked = false;
   private readonly opts: SinkOptions;
+  private readonly cleaner: DomCleaner;
 
   constructor(config: RemoteConfig, fetchFn: FetchFn = (...a) => fetch(...a), opts: SinkOptions = {}) {
     if (!config.appId) throw new Error('Recap: remote.appId is required');
@@ -291,6 +414,7 @@ export class RemoteSink {
     this.config = config;
     this.fetchFn = fetchFn;
     this.opts = opts;
+    this.cleaner = new DomCleaner(config.stripQueryParams === false);
     this.sessionId = getSessionId();
 
     // One session can span several page loads in the same tab, so its start time lives in sessionStorage.
@@ -345,8 +469,8 @@ export class RemoteSink {
 
   /**
    * The visitor opted out: stop at once and delete everything not yet sent (events and
-   * recording). The browser's random id is forgotten too, so a later opt-in can't be linked to
-   * earlier visits.
+   * recording). This tab's session and the browser's random id are forgotten too, so a later
+   * opt-in starts a new session that can't be linked to earlier visits.
    */
   discard(): void {
     this.active = false;
@@ -356,11 +480,7 @@ export class RemoteSink {
     this.stopFns = [];
     this.endRecording('opted out: recording stopped');
     this.queue = [];
-    try {
-      localStorage.removeItem(KEY_ANON);
-    } catch {
-      // storage blocked: nothing was kept
-    }
+    forgetRemoteSession();
   }
 
   getSessionId(): string {
@@ -427,10 +547,29 @@ export class RemoteSink {
     }
   }
 
-  /** A custom event, e.g. track('added_to_basket', { sku: 'A1' }). */
+  /**
+   * A custom event, e.g. track('added_to_basket', { sku: 'A1' }). The properties are copied as JSON
+   * now: ones that can't be (circular, BigInt) or come to more than 8 KB drop the event, so one bad
+   * call can't hold up the rest of the session. A `name` property can't replace the event's name.
+   */
   track(name: string, props: Record<string, unknown> = {}): void {
-    if (!this.sampled || !name) return;
-    this.push('custom', { name, ...props });
+    if (!this.sampled || typeof name !== 'string' || !name) return;
+    let json: string | undefined;
+    try {
+      json = JSON.stringify(props ?? {});
+    } catch (err) {
+      this.log(`track('${name}') dropped: its properties can't be sent as JSON (circular, or a BigInt)`, err);
+      return;
+    }
+    const bytes = json === undefined ? 0 : utf8Bytes(json);
+    if (bytes > MAX_PROPS_BYTES) {
+      this.log(`track('${name}') dropped: its properties are ${Math.ceil(bytes / 1024)} KB as JSON, over the 8 KB limit`);
+      return;
+    }
+    const copy: unknown = json === undefined ? null : JSON.parse(json);
+    const data = copy && typeof copy === 'object' && !Array.isArray(copy) ? (copy as Record<string, unknown>) : {};
+    if ('name' in data) this.log(`track('${name}'): its name property was left out; it can't replace the event name`);
+    this.push('custom', { ...data, name });
   }
 
   pending(): readonly IngestEvent[] {
@@ -581,34 +720,40 @@ export class RemoteSink {
       const opt = this.config.recordings;
       if (!opt || this.recordingBlocked) return;
       const o: RemoteRecordingOptions = opt === true ? {} : opt;
-      const key = 'recap-remote-rec';
-      const saved = store('session', key);
+      // Checked before anything loads: rrweb ignores a selector it can't read, which would record
+      // the parts the privacy markers are meant to keep out.
+      const selectors = recordingSelectors(o);
+      if (!selectors) return;
+      const saved = store('session', KEY_REC);
       const on = this.opts.recordIn === true || (saved !== null ? saved === '1' : Math.random() < (o.sampleRate ?? 1));
-      store('session', key, on ? '1' : '0');
+      store('session', KEY_REC, on ? '1' : '0');
       if (!on) {
         // Tabs left out never load the recorder.
         this.log('recordings: this tab is not in the recorded share (recordings.sampleRate)');
         return;
       }
-      const record = o.record ?? pageRecord();
+      // rrweb already on the page is used only when the site asks: it may be another version.
+      const record = o.record ?? (o.useGlobalRrweb === true ? pageRecord() : undefined);
       if (record) {
-        this.beginRecording(record, o);
+        this.beginRecording(record, o, selectors);
         return;
       }
       const src = o.src ?? _defaultRrwebSrc;
       if (!src) {
         this.log(
           "recordings are on but rrweb isn't loaded: pass recordings.record (import { record } from 'rrweb'), " +
-            'or recordings.src with the address of recap-rrweb.min.js',
+            'recordings.src with the address of recap-rrweb.min.js, or useGlobalRrweb: true to use rrweb already on the page',
         );
         return;
       }
-      this.log(`loading the recorder from ${src}`);
-      loadScript(src, o.integrity).then(
+      // Recap's own recorder, next to recap.min.js, is checked against the hash it was built with.
+      const integrity = o.integrity ?? (o.src ? undefined : (_defaultRrwebIntegrity ?? undefined));
+      this.log(`loading the recorder from ${src}${integrity ? ' (integrity checked)' : ''}`);
+      loadScript(src, integrity).then(
         () => {
           if (!this.active || this.recordingBlocked || this.recordFn) return;
-          const loaded = pageRecord();
-          if (loaded) this.beginRecording(loaded, o);
+          const loaded = ownRecord() ?? pageRecord();
+          if (loaded) this.beginRecording(loaded, o, selectors);
           else this.log(`recordings are off for this page: ${src} loaded but did not set window.rrweb.record`);
         },
         (err: unknown) =>
@@ -622,8 +767,7 @@ export class RemoteSink {
     }
   }
 
-  private beginRecording(record: RrwebRecord, o: RemoteRecordingOptions): void {
-    const block = [EXCLUDE_SELECTOR, o.blockSelector].filter(Boolean).join(', ');
+  private beginRecording(record: RrwebRecord, o: RemoteRecordingOptions, selectors: RecordingSelectors): void {
     const fps = canvasFps(o.canvas);
     // Set before record() runs: rrweb emits the first full snapshot while it starts.
     this.recordFn = record;
@@ -631,10 +775,12 @@ export class RemoteSink {
     try {
       stop = record({
         emit: (e: RrwebEvent) => this.pushDom(e),
-        maskAllInputs: true,
-        blockSelector: block,
-        // Text is replaced with * (same length, so the layout stays): the mask marker always, plus maskText.
-        maskTextSelector: maskTextSelectorFor(o.maskText),
+        // Every field whose value is text, hidden fields included (not maskAllInputs, which skips them).
+        maskInputOptions: { ...MASK_INPUT_OPTIONS },
+        blockSelector: selectors.block,
+        // Text is replaced with * (same length, so the layout stays): the mask marker and editable
+        // regions always, plus maskText.
+        maskTextSelector: selectors.mask,
         inlineStylesheet: true,
         recordCanvas: fps > 0,
         collectFonts: false,
@@ -668,7 +814,15 @@ export class RemoteSink {
 
   private pushDom(event: RrwebEvent): void {
     if (!this.recordFn || this.recordingBlocked) return;
-    const e = this.cleanDom(event);
+    let e: RrwebEvent;
+    try {
+      e = this.cleaner.clean(event);
+    } catch (err) {
+      // Never send an event that couldn't be cleaned; the replay can't go on without it.
+      this.endRecording('recordings are off for this session: an event could not be cleaned');
+      this.log('clean error', err);
+      return;
+    }
     const n = utf8Bytes(JSON.stringify(e));
     if (e.type === 2) {
       this.log(`full snapshot: ${Math.round(n / 1000)} KB`);
@@ -700,19 +854,6 @@ export class RemoteSink {
       return;
     }
     if (this.domBytes >= DOM_CHUNK_BYTES && this.uploaded) void this.sendDom();
-  }
-
-  /**
-   * An rrweb event as it may be stored. Meta events carry the page address: keep its origin and
-   * path (the Replayer needs an absolute address to load relative images and stylesheets) and drop
-   * the hash and, unless stripQueryParams is false, the query string, which can hold ids and
-   * tokens. Same rules as the addresses of page views, but without the screenName hook.
-   */
-  private cleanDom(e: RrwebEvent): RrwebEvent {
-    if (e.type !== 4) return e;
-    const data = e['data'] as Record<string, unknown> | undefined;
-    if (!data || typeof data['href'] !== 'string') return e;
-    return { ...e, data: { ...data, href: sanitizeHref(data['href'], this.config.stripQueryParams !== false) } };
   }
 
   /** The oldest buffered events, up to maxBytes. Always at least one, so a big snapshot goes alone. */

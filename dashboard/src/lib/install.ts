@@ -2,9 +2,9 @@
 
 /** The web script this dashboard hands out. Keep in step with README.md (a test checks). */
 export const RECAP_WEB = {
-  version: '1.3.0',
-  src: 'https://cdn.jsdelivr.net/gh/Scylark/recap@v1.3.0/dist/recap.min.js',
-  integrity: 'sha384-8wgD4Wmlu6eME7JD9xA+I/gWbqutajBp2faL0205zSqQYR1kmkBAIkpubfFtUdh5',
+  version: '1.3.1',
+  src: 'https://cdn.jsdelivr.net/gh/Scylark/recap@v1.3.1/dist/recap.min.js',
+  integrity: 'sha384-k9EqAMrKM17GgIQendxcePn/V9NQwfnTUDRIXEM6seVdxCzKCe3tGn1II7GpPP8v',
 };
 
 export const PLACEHOLDER_URL = 'https://YOUR-PROJECT.supabase.co';

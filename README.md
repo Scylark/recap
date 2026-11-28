@@ -95,8 +95,8 @@ logs an error and sends nothing.
 
 ```html
 <script defer
-  src="https://cdn.jsdelivr.net/gh/Scylark/recap@v1.3.0/dist/recap.min.js"
-  integrity="sha384-8wgD4Wmlu6eME7JD9xA+I/gWbqutajBp2faL0205zSqQYR1kmkBAIkpubfFtUdh5" crossorigin="anonymous"
+  src="https://cdn.jsdelivr.net/gh/Scylark/recap@v1.3.1/dist/recap.min.js"
+  integrity="sha384-k9EqAMrKM17GgIQendxcePn/V9NQwfnTUDRIXEM6seVdxCzKCe3tGn1II7GpPP8v" crossorigin="anonymous"
   data-app-id="my-site"
   data-supabase-url="https://your-project.supabase.co"
   data-supabase-key="sb_publishable_…"
@@ -211,8 +211,21 @@ dashboard (`supabase`, `remote` or `Recap.connect()`); without one, the old prot
 
 Page recordings use [rrweb](https://github.com/rrweb-io/rrweb) 2.2.2, the version the dashboard plays them
 back with. They capture the page's structure and changes rather than pictures, so replays are sharp and
-smooth, scrolling and open menus included. Every form field is masked, `data-recap-private` parts are left
-out, and the page address keeps only its origin and path.
+smooth, scrolling and open menus included. What a recording never keeps:
+
+- **Anything typed.** Every form field is masked, hidden and file fields included, and so is every editable
+  area (`contenteditable`, `role="textbox"`: chat boxes and rich-text editors).
+- **Secrets in addresses.** The page address keeps only its origin and path, and every link, image and CSS
+  address on your own site loses its query string and hash too, so a reset or sign-in token in the address
+  bar can't reach the database through a `#main` skip link. Addresses on other sites are left as they are.
+  (Next.js `/_next/image` and Astro `/_image` addresses keep their size parameters, so images still show.)
+- **Token meta tags** (`csrf-token` and similar) lose their content.
+- **`data-recap-private` parts**, which are left out entirely.
+
+If one of your own `data-mask-text` or `blockSelector` selectors is invalid, Recap logs an error and doesn't
+record that page, rather than recording without your privacy markers. The recorder file is checked against
+the hash built into `recap.min.js`, so a changed `recap-rrweb.min.js` next to it is refused. A module build
+ignores any `window.rrweb` already on the page unless you set `recordings: { useGlobalRrweb: true }`.
 
 With the script tag, `data-recordings="true"` is all it takes: a tab that is sampled in loads
 `recap-rrweb.min.js` (rrweb's recorder, about 23 kB gzipped) from the same folder as `recap.min.js`, and
@@ -264,6 +277,21 @@ in your own script:
 ```
 
 The same pattern passes `screenName` or RegExp `excludePaths`.
+
+### Upgrading to 1.3.1
+
+A privacy and security release. Update the tag's version and both `integrity` hashes (above), and if you
+host the files yourself, copy **both** `recap.min.js` and `recap-rrweb.min.js` from the same release: the
+recorder is now checked against a hash built into `recap.min.js`, and an older or newer one is refused.
+
+- Recordings mask editable areas (chat boxes, rich-text editors), hidden and file fields, and token meta
+  tags, and strip query strings and hashes from addresses on your own site, not just the page address.
+- An invalid `data-mask-text` or `blockSelector` stops recording that page (with a console error).
+- `labels: 'attributes'` no longer follows `aria-labelledby`, and tap selectors skip element ids that look
+  like personal data (an `@`, or three digits in a row).
+- `track()` drops events whose properties can't be sent or are over 8 KB, instead of stalling the queue.
+- Opting out ends the session in this tab; opting back in starts a new one.
+- A module build ignores a `window.rrweb` already on the page unless `recordings.useGlobalRrweb` is true.
 
 ### Upgrading from 1.2
 
@@ -351,7 +379,8 @@ clickable role, or element with `data-ut-label`. A tap on an icon inside a butto
 
 Recap labels it from, in order: `data-ut-label`, `aria-label`, `aria-labelledby`, `title`, `alt`, the visible text
 (first 50 characters) and `placeholder`. The `labels` setting limits that: `'text'` uses them all,
-`'attributes'` everything except the visible text, and `'none'` only `data-ut-label`. It defaults to `'text'`
+`'attributes'` everything except the visible text and `aria-labelledby` (which points at visible text), and
+`'none'` only `data-ut-label`. It defaults to `'text'`
 while data stays in the browser and `'attributes'` once sessions go to a dashboard. For ambiguous elements,
 add explicit labels:
 
@@ -395,6 +424,12 @@ npm run build        # Build dist/ bundles
 ```
 
 Project structure and architecture details are in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+
+## Security
+
+How Recap is protected, the settings every owner should check, and what someone holding your public key can
+and can't do: [docs/security.md](./docs/security.md). Report problems privately through a
+[security advisory](https://github.com/Scylark/recap/security/advisories/new).
 
 ## Contributing
 

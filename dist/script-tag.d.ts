@@ -1,5 +1,10 @@
 import type { RecapConfig } from './types.js';
 /**
+ * Subresource integrity for Recap's own recap-rrweb.min.js, so a changed file next to recap.min.js
+ * is refused instead of run. Empty outside the script-tag build (tests, module builds).
+ */
+export declare const RRWEB_INTEGRITY: string;
+/**
  * Whether a script tag loads Recap: it has a data-recap attribute, or its file is one of Recap's
  * own. Other scripts with "recap" in their address (Google's recaptcha__en.js) don't count, and
  * neither do the privacy markers (data-recap-private, data-recap-mask): they are other attributes.

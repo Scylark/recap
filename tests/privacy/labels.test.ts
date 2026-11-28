@@ -100,6 +100,17 @@ describe('label modes', () => {
     html('<span id="a">Next</span><span id="b">week</span><button id="x" aria-labelledby="a b"></button>');
     expect(extractLabel($('#x'))).toBe('Next week');
   });
+
+  it("'attributes' doesn't follow aria-labelledby: it points at visible text", () => {
+    html(`
+      <li><span id="who">Jane Doe</span><button id="del" aria-labelledby="who del-text"><span id="del-text">Delete</span></button></li>
+      <button id="both" aria-labelledby="who" title="Remove member"></button>`);
+    setLabelMode('attributes');
+    expect(extractLabel($('#del'))).toBeNull();
+    expect(extractLabel($('#both'))).toBe('Remove member');
+    setLabelMode('text');
+    expect(extractLabel($('#del'))).toBe('Jane Doe Delete');
+  });
 });
 
 describe('ut-mask', () => {
