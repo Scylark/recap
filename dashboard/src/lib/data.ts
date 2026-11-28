@@ -1,5 +1,6 @@
 import { db } from './supabase';
-import { recordingOrder, trustedRecordingSize, type RecordedVisit, type TapRow } from './heatmap';
+import { pickSnapshot, recordingOrder, type RecordedVisit, type TapRow } from './heatmap';
+import { afterCursor, commonStart, readNewest } from './paging';
 import type { EventRow, Member, ScreenStat, SessionRow } from './types';
 
 function check<T>(res: { data: T | null; error: { message: string } | null }): T {
@@ -234,34 +235,6 @@ export async function getDomRecording(sessionId: string): Promise<{ events: DomE
 
 // ------------------------------------------------------------------ heatmaps
 
-/** Supabase answers at most 1,000 rows a request, whatever the limit asked for. */
-const PAGE = 1000;
-
-/**
- * Read up to `max` rows, newest first by id, in pages of 1,000. Each page starts below the last id
- * read (not at an offset), so rows that arrive while it reads are never counted twice. "Newest" is
- * by arrival in the database rather than the browser's own time (`at`): close, and stable to page by. `capped` is
- * true only when there were more than `max`. `page(beforeId, n)` builds one page's query: ordered by
- * id descending, below `beforeId` when given, at most `n` rows.
- */
-async function readNewest<T extends { id: number }>(
-  page: (beforeId: number | null, n: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
-  max: number,
-): Promise<{ rows: T[]; capped: boolean }> {
-  const rows: T[] = [];
-  let before: number | null = null;
-  while (rows.length <= max) {
-    const n = Math.min(PAGE, max + 1 - rows.length);
-    const res = await page(before, n);
-    if (res.error) throw new Error(res.error.message);
-    const got = (res.data ?? []) as T[];
-    rows.push(...got);
-    if (got.length < n || !got.length) break;
-    before = got[got.length - 1]!.id;
-  }
-  return { rows: rows.slice(0, max), capped: rows.length > max };
-}
-
 /** Everything the Heatmaps page needs for one screen: taps, visits and how far each visit scrolled. */
 export interface ScreenActivity {
   taps: TapRow[];
@@ -321,26 +294,26 @@ export interface EventSessions {
 
 /** Sessions in the period that sent this custom event (for "visits that signed up" and the like). */
 export async function sessionsWithEvent(appId: string, name: string, since: string): Promise<EventSessions> {
-  const { rows, capped } = await readNewest<{ id: number; session_id: string }>((before, n) => {
+  const { rows, capped } = await readNewest<{ id: number; at: string; session_id: string }>((after, n) => {
     let q = db()
       .from('recap_events')
-      .select('id,session_id')
+      .select('id,at,session_id')
       .eq('app_id', appId)
       .eq('type', 'custom')
       .eq('data->>name', name)
       .gte('at', since);
-    if (before !== null) q = q.lt('id', before);
-    return q.order('id', { ascending: false }).limit(n);
+    if (after) q = q.or(afterCursor(after));
+    return q.order('at', { ascending: false }).order('id', { ascending: false }).limit(n);
   }, 20000);
   return { sessions: new Set(rows.map((r) => r.session_id)), capped };
 }
 
 export async function screenActivity(appId: string, screen: string, since: string): Promise<ScreenActivity> {
-  const events = <T extends { id: number }>(type: 'tap' | 'screen' | 'scroll', select: string, max: number) =>
-    readNewest<T>((before, n) => {
+  const events = <T extends { id: number; at: string }>(type: 'tap' | 'screen' | 'scroll', select: string, max: number) =>
+    readNewest<T>((after, n) => {
       let q = db().from('recap_events').select(select).eq('app_id', appId).eq('type', type).eq('screen', screen).gte('at', since);
-      if (before !== null) q = q.lt('id', before);
-      return q.order('id', { ascending: false }).limit(n);
+      if (after) q = q.or(afterCursor(after));
+      return q.order('at', { ascending: false }).order('id', { ascending: false }).limit(n);
     }, max);
   type Tap = { id: number; session_id: string; t_ms: number; at: string; data: Record<string, unknown> };
   type View = { id: number; session_id: string; t_ms: number; at: string };
@@ -353,9 +326,7 @@ export async function screenActivity(appId: string, screen: string, since: strin
   // When a list stopped short, all three start where the shortest one did, so "of visits" and
   // "how far down" compare the same visits. Times compared as times, whatever their offset.
   const ms = (at: string) => Date.parse(at);
-  let fromMs = ms(since);
-  for (const r of [tapRes, viewRes, scrollRes] as { rows: { at: string }[]; capped: boolean }[])
-    if (r.capped && r.rows.length) fromMs = Math.max(fromMs, Math.min(...r.rows.map((x) => ms(x.at)).filter(Number.isFinite)));
+  const fromMs = commonStart([tapRes, viewRes, scrollRes], since);
   const narrowed = fromMs > ms(since);
   const inSpan = <T extends { at: string }>(rows: T[]) => (narrowed ? rows.filter((r) => ms(r.at) >= fromMs) : rows);
   const taps = inSpan(tapRes.rows);
@@ -394,19 +365,25 @@ export interface PageSnapshot {
  * A recording of this screen: the full snapshot rrweb took when the screen loaded, from the first
  * visit in `recordingOrder` (starting at `from`) that has one. The web script takes a full snapshot
  * when a page loads, so a screen reached without a page load (a single-page app) has none of its own.
- * Each try reads at most two chunks, between the view and the visit's next screen.
+ *
+ * Kept cheap, as it runs whenever the page opens: per visit, one query for where the visit went next,
+ * one for the ids of chunks holding a full snapshot in that window (the database filters them), and
+ * then only those chunks are read. It gives up after three visits with no snapshot of their own, and
+ * a recording skipped for an untrustworthy size doesn't count towards that.
  */
 export async function pageSnapshotFor(
   visits: RecordedVisit[],
   from = 0,
   width?: number | null,
-  tries = 8,
+  maxMisses = 3,
+  maxVisits = 12,
 ): Promise<PageSnapshot | null> {
   const ordered = recordingOrder(visits, width);
-  let attempts = 0;
-  for (let index = Math.max(0, from); index < ordered.length && attempts < tries; index++) {
+  let misses = 0;
+  let looked = 0;
+  for (let index = Math.max(0, from); index < ordered.length && misses < maxMisses && looked < maxVisits; index++) {
     const v = ordered[index]!;
-    attempts++;
+    looked++;
     // Where the visit went next, so a snapshot of the next screen isn't taken for this one.
     let untilMs = v.untilMs;
     if (untilMs === undefined) {
@@ -421,42 +398,36 @@ export async function pageSnapshotFor(
       const row = ((next.data ?? []) as { t_ms: number }[])[0];
       if (row) untilMs = row.t_ms;
     }
-    // List the chunks between the view and the next screen first (small), then read them one at a
-    // time until a full snapshot turns up: a large snapshot is often a chunk of its own, and a chunk
-    // or two from the screen before can start just ahead of it.
+    // Only the chunks holding a full snapshot (rrweb event type 2), between the view and the next screen.
     let list = db()
       .from('recap_dom')
       .select('id,t_ms')
       .eq('session_id', v.sessionId)
-      .gte('t_ms', Math.max(0, v.tMs - 1000));
+      .gte('t_ms', Math.max(0, v.tMs - 1000))
+      .filter('events', 'cs', '[{"type":2}]');
     if (untilMs !== undefined) list = list.lt('t_ms', untilMs);
-    const chunks = await list.order('t_ms', { ascending: true }).order('id', { ascending: true }).limit(6);
+    const chunks = await list.order('t_ms', { ascending: true }).order('id', { ascending: true }).limit(3);
     if (chunks.error) return null; // older databases without web recordings
     // rrweb's clock and the session's are the same browser's: keep to this visit to the screen.
     const startedAt = Date.parse(v.startedAt);
-    const viewedAt = startedAt + v.tMs;
+    const viewedAt = startedAt + v.tMs - 1000;
     const leftAt = untilMs !== undefined ? startedAt + untilMs : Infinity;
-    const ours = (e: DomEvent) => e.type === 2 && (!Number.isFinite(viewedAt) || (e.timestamp >= viewedAt - 1000 && e.timestamp < leftAt));
-    const events: DomEvent[] = [];
-    for (const c of ((chunks.data ?? []) as { id: number }[]).slice(0, 4)) {
+    let picked: ReturnType<typeof pickSnapshot> = 'miss';
+    for (const c of ((chunks.data ?? []) as { id: number }[]).slice(0, 2)) {
       const res = await db().from('recap_dom').select('events').eq('id', c.id).limit(1);
       const row = ((res.data ?? []) as { events: DomEvent[] }[])[0];
       if (!row || !Array.isArray(row.events)) continue;
-      events.push(...row.events);
-      if (row.events.some(ours)) break; // not one from the screen before
+      picked = pickSnapshot(row.events, viewedAt, leftAt, { width: v.width, height: v.height });
+      if (picked !== 'miss') break; // 'miss': a snapshot of the screen before
     }
-    events.sort((a, b) => a.timestamp - b.timestamp);
-    const fullAt = events.findIndex(ours);
-    if (fullAt < 0) continue;
-    let meta: DomEvent | undefined;
-    for (let i = fullAt - 1; i >= 0; i--) if (events[i]!.type === 4) (meta = events[i]), (i = -1);
+    if (picked === 'miss') {
+      misses++;
+      continue;
+    }
     // Its window decides how large the page and its canvas are drawn, and anyone with the public key
-    // can upload a recording: skip one whose window doesn't match its session's.
-    const size = meta ? trustedRecordingSize((meta.data ?? {}) as { width?: unknown; height?: unknown }, v.width) : null;
-    if (!meta || !size) continue;
-    const full = events[fullAt]!;
-    const trusted = { ...meta, data: { ...(meta.data as object), width: size.width, height: size.height } };
-    return { sessionId: v.sessionId, startedAt: v.startedAt, events: [trusted, full], width: size.width, height: size.height, index };
+    // can upload a recording: one whose window doesn't match its session's is skipped.
+    if (picked === 'untrusted') continue;
+    return { sessionId: v.sessionId, startedAt: v.startedAt, events: picked.events as DomEvent[], width: picked.width, height: picked.height, index };
   }
   return null;
 }

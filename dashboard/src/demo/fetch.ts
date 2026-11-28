@@ -45,6 +45,23 @@ function test(row: Row, col: string, expr: string): boolean {
       ok = op === 'gte' ? c >= 0 : op === 'gt' ? c > 0 : c < 0;
       break;
     }
+    case 'cs': {
+      // jsonb contains, as used on recording chunks: an array holding an object with these fields.
+      let want: unknown;
+      try {
+        want = JSON.parse(val);
+      } catch {
+        want = null;
+      }
+      const has = (whole: unknown, part: unknown): boolean =>
+        Array.isArray(part)
+          ? Array.isArray(whole) && part.every((p) => whole.some((w) => has(w, p)))
+          : part && typeof part === 'object'
+            ? !!whole && typeof whole === 'object' && Object.entries(part).every(([key, pv]) => has((whole as Row)[key], pv))
+            : whole === part;
+      ok = want !== null && has(v, want);
+      break;
+    }
     case 'is':
       ok = val === 'null' ? v == null : String(v) === val;
       break;
@@ -59,13 +76,17 @@ function test(row: Row, col: string, expr: string): boolean {
   return neg ? !ok : ok;
 }
 
+/** Split a PostgREST condition list on its top-level commas (not inside quotes or brackets). */
 function splitOr(s: string): string[] {
   const out: string[] = [];
   let cur = '';
   let q = false;
+  let depth = 0;
   for (const ch of s) {
     if (ch === '"') q = !q;
-    if (ch === ',' && !q) {
+    if (!q && ch === '(') depth++;
+    if (!q && ch === ')') depth--;
+    if (ch === ',' && !q && depth === 0) {
       out.push(cur);
       cur = '';
     } else cur += ch;
@@ -74,16 +95,24 @@ function splitOr(s: string): string[] {
   return out;
 }
 
+/** One condition from an `or` list: `col.op.value`, or a nested `and(...)` / `or(...)`. */
+function cond(row: Row, c: string): boolean {
+  const nested = /^(and|or)\((.*)\)$/.exec(c);
+  if (nested) {
+    const parts = splitOr(nested[2]!);
+    return nested[1] === 'and' ? parts.every((p) => cond(row, p)) : parts.some((p) => cond(row, p));
+  }
+  const i = c.indexOf('.');
+  return test(row, c.slice(0, i), c.slice(i + 1));
+}
+
 function query(rows: Row[], params: URLSearchParams): Row[] {
   let out = rows;
   for (const [k, v] of params) {
     if (['select', 'order', 'offset', 'limit'].includes(k)) continue;
     if (k === 'or') {
-      const parts = splitOr(v.slice(1, -1)).map((p) => {
-        const i = p.indexOf('.');
-        return [p.slice(0, i), p.slice(i + 1)] as const;
-      });
-      out = out.filter((r) => parts.some(([c, e]) => test(r, c, e)));
+      const parts = splitOr(v.slice(1, -1));
+      out = out.filter((r) => parts.some((p) => cond(r, p)));
     } else out = out.filter((r) => test(r, k, v));
   }
   const order = params.get('order');

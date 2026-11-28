@@ -340,8 +340,9 @@ export interface RecordedVisit {
   startedAt: string;
   /** When the same visit moved to another screen (session timeline), if it did. */
   untilMs?: number;
-  /** The visit's window width, to prefer recordings at the width the taps came from. */
+  /** The visit's window, to prefer recordings at the width the taps came from and to check one's size. */
   width?: number | null;
+  height?: number | null;
 }
 
 /**
@@ -365,17 +366,56 @@ export const MAX_RECORDED_HEIGHT = 4000;
 
 /**
  * The window a recording says it was made in, if it can be believed. Anyone with the public key can
- * upload a recording, and its size sets the size of the drawn page and the heat canvas, so it must be
- * within 1.5x of the window its session reported, and is clamped to a sane maximum. Null: skip it.
+ * upload a recording, and its size sets the size of the drawn page and the heat canvas, so its width
+ * must be within 1.5x of the window its session reported, either way round (a phone turned sideways
+ * records 844 wide against a 390 x 844 session), and is clamped to a sane maximum. Null: skip it.
  */
 export function trustedRecordingSize(
   meta: { width?: unknown; height?: unknown },
   sessionWidth?: number | null,
+  sessionHeight?: number | null,
 ): { width: number; height: number } | null {
   const w = Number(meta.width);
   const h = Number(meta.height);
   if (!Number.isFinite(w) || !Number.isFinite(h) || w < 200 || h < 200) return null;
-  if (sessionWidth && sessionWidth > 0 && (w > sessionWidth * 1.5 || w * 1.5 < sessionWidth)) return null;
+  const near = (side?: number | null) => !!side && side > 0 && w <= side * 1.5 && w * 1.5 >= side;
+  if (sessionWidth && sessionWidth > 0 && !near(sessionWidth) && !near(sessionHeight)) return null;
   return { width: Math.min(MAX_RECORDED_WIDTH, Math.round(w)), height: Math.min(MAX_RECORDED_HEIGHT, Math.round(h)) };
+}
+
+/** An rrweb event as stored in a recording chunk. */
+export interface RecEvent {
+  type: number;
+  timestamp: number;
+  data?: unknown;
+  [key: string]: unknown;
+}
+
+/**
+ * The page a chunk shows for one visit to a screen: its full snapshot (rrweb type 2) taken between
+ * `from` and `until` (epoch ms), with the window it was drawn in. The window comes from the meta event
+ * (type 4) before the snapshot when the chunk holds it, else from the session: the web script sends a
+ * large snapshot as a chunk of its own, with its meta event at the end of the chunk before. 'miss':
+ * no snapshot of this visit here. 'untrusted': its window doesn't match the session's (see
+ * trustedRecordingSize). Pure.
+ */
+export function pickSnapshot(
+  chunkEvents: RecEvent[],
+  from: number,
+  until: number,
+  session: { width?: number | null; height?: number | null },
+): { events: [RecEvent, RecEvent]; width: number; height: number } | 'miss' | 'untrusted' {
+  const events = [...chunkEvents].sort((a, b) => a.timestamp - b.timestamp);
+  const at = events.findIndex((e) => e.type === 2 && (!Number.isFinite(from) || (e.timestamp >= from && e.timestamp < until)));
+  if (at < 0) return 'miss';
+  const full = events[at]!;
+  let meta: RecEvent | undefined;
+  for (let i = at - 1; i >= 0 && !meta; i--) if (events[i]!.type === 4) meta = events[i];
+  const claimed = (meta?.data ?? { width: session.width, height: session.height }) as { width?: unknown; height?: unknown };
+  const size = trustedRecordingSize(claimed, session.width, session.height);
+  if (!size) return 'untrusted';
+  const base = meta ?? { type: 4, timestamp: full.timestamp - 1, data: { href: 'about:blank' } };
+  const trusted: RecEvent = { ...base, data: { ...((base.data as object) ?? {}), width: size.width, height: size.height } };
+  return { events: [trusted, full], width: size.width, height: size.height };
 }
 

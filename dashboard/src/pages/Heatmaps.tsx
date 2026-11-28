@@ -114,7 +114,7 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
     () =>
       sizeVisits
         .filter((v) => v.s.platform === 'web' && v.s.has_recording !== false)
-        .map((v) => ({ sessionId: v.sessionId, tMs: v.tMs, startedAt: v.s.started_at, width: v.s.screen_width })),
+        .map((v) => ({ sessionId: v.sessionId, tMs: v.tMs, startedAt: v.s.started_at, width: v.s.screen_width, height: v.s.screen_height })),
     [sizeVisits],
   );
   const recordedKey = `${recorded.length}:${recorded.slice(0, 8).map((v) => `${v.sessionId}:${v.tMs}`).join(',')}`;
@@ -215,7 +215,11 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
       <div className="pair heat-pair">
         <div className={web ? 'heat-main' : ''} style={web ? { width: `min(100%, ${Math.round(snapshot.data?.width || viewport.width)}px)` } : undefined}>
           {web === null ? (
-            <div className="heat-loading muted">Loading…</div>
+            activity.error ? (
+              <div className="heat-loading error">This screen's taps couldn't be loaded. Try again in a moment.</div>
+            ) : (
+              <div className="heat-loading muted">Loading…</div>
+            )
           ) : web ? (
             <PageHeatmap
               taps={here}

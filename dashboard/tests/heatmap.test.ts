@@ -13,6 +13,7 @@ import {
   scrollReach,
   toTap,
   targetsCsv,
+  pickSnapshot,
   topTargets,
   trustedRecordingSize,
   type Anchor,
@@ -276,6 +277,9 @@ describe('a recording cannot size the page past what is safe', () => {
     expect(trustedRecordingSize({ width: 100000, height: 100000 }, null)).toEqual({ width: 4000, height: 4000 });
     expect(trustedRecordingSize({ width: 'wide', height: 900 }, 1440)).toBeNull();
     expect(trustedRecordingSize({}, 1440)).toBeNull();
+    // A phone turned sideways: 844 wide against a 390 x 844 session.
+    expect(trustedRecordingSize({ width: 844, height: 390 }, 390, 844)).toEqual({ width: 844, height: 390 });
+    expect(trustedRecordingSize({ width: 3000, height: 390 }, 390, 844)).toBeNull();
   });
 
   it('keeps the heat canvas within the pixel cap at any size', () => {
@@ -289,5 +293,28 @@ describe('a recording cannot size the page past what is safe', () => {
       expect(Math.floor(w! * dpr) * Math.floor(h! * dpr)).toBeLessThanOrEqual(MAX_PIXELS);
     }
     expect(heatResolution(390, 3000, 2)).toBe(2);
+  });
+});
+
+describe('picking a visit\'s page from a recording chunk', () => {
+  const meta = (ts: number, width: number, height: number) => ({ type: 4, timestamp: ts, data: { href: 'https://x/', width, height } });
+  const full = (ts: number) => ({ type: 2, timestamp: ts, data: { node: {} } });
+
+  it('takes the snapshot and its window from the chunk', () => {
+    const p = pickSnapshot([meta(1000, 390, 844), full(1001), { type: 3, timestamp: 1500 }], 900, 5000, { width: 390, height: 844 });
+    expect(p).not.toBe('miss');
+    expect(p).toMatchObject({ width: 390, height: 844 });
+  });
+
+  it('uses the session\'s window when the meta event went in the chunk before', () => {
+    const p = pickSnapshot([full(1001)], 900, 5000, { width: 390, height: 844 });
+    expect(p).toMatchObject({ width: 390, height: 844 });
+    if (typeof p === 'object') expect(p.events[0]).toMatchObject({ type: 4, data: { width: 390, height: 844 } });
+  });
+
+  it('leaves a snapshot of the screen before, and one claiming an implausible window', () => {
+    expect(pickSnapshot([meta(100, 390, 844), full(101)], 900, 5000, { width: 390, height: 844 })).toBe('miss');
+    expect(pickSnapshot([full(6000)], 900, 5000, { width: 390, height: 844 })).toBe('miss');
+    expect(pickSnapshot([meta(1000, 100000, 844), full(1001)], 900, 5000, { width: 390, height: 844 })).toBe('untrusted');
   });
 });
