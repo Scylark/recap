@@ -29,6 +29,10 @@ Try Recap on a live prototype at **[recap-ux.com](https://recap-ux.com)**. The s
 | A React Native or Expo app | Ask your coding agent to follow [AGENTS.md](./AGENTS.md). | 30 min |
 | A prototype to test with people, no backend | [Quick start](#quick-start): one script tag, data stays in the browser. | 1 min |
 
+**Heatmaps for websites:** the whole page at its full length for phone, tablet and desktop, drawn from a
+recorded visit, with scroll depth, the fold, rage and dead taps, and segments by your own events. See
+[docs/heatmaps.md](./docs/heatmaps.md).
+
 Putting Recap on a real product? Read [what we learned doing it](./docs/learnings.md) first: where personal
 data hides in recordings, storage sizes, opt-out, Capacitor apps and store labels.
 

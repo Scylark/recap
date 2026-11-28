@@ -100,6 +100,11 @@ dashboard's Storage page, and watch its recordings meter in the first weeks.
 - The Sessions list marks recorded visits and lists them first. A visit with no recording says why: not
   picked by the sample rate, or recordings had reached their limit.
 
+## Heatmaps on a website
+
+See [heatmaps.md](heatmaps.md): positions in the page rather than the window, one map per device size, `100vh`
+sections in a tall frame, fixed bars, and what a marketing team reads from them.
+
 ## Custom events
 
 - Fire them where the outcome is certain (after a save succeeds, not on the button press).

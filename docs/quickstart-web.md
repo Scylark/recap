@@ -86,7 +86,8 @@ be counted or recorded.
 the limits on the Storage page (step 2). On a busy site, add `data-record-sample="0.2"` to record one
 visit in five. Recap loads its recorder (`recap-rrweb.min.js`, next to `recap.min.js`) only for recorded
 visits. Add `data-record-canvas="true"` if your pages draw charts on a canvas. In the dashboard's session
-list, recorded visits are marked and listed first.
+list, recorded visits are marked and listed first. Recordings also give heatmaps a page to draw on (see
+[heatmaps.md](heatmaps.md)); name key buttons with `data-ut-label` so heatmaps list them by name.
 
 ## 5. Check it works (5 min)
 
