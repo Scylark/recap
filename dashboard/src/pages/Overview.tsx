@@ -84,8 +84,9 @@ export function Empty() {
     <div className="card empty">
       <h3>No sessions yet</h3>
       <p>
-        Once the Recap SDK is in your app and someone opens it, sessions appear here within about ten seconds.
-        Not seeing anything? Turn on <code>debug: true</code> in the SDK config and check the app's logs.
+        Once Recap is on your site or in your app and someone opens it, sessions appear here within about ten seconds.
+        Not set up yet? See <a href="#/install">Install</a>. Not seeing anything? Open your site with{' '}
+        <code>?recap=on</code>, or turn on <code>debug: true</code> in the app's config, and check the console.
       </p>
       <button onClick={() => go('overview')}>Refresh</button>
     </div>

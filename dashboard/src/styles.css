@@ -311,3 +311,16 @@ tr.selected td { background: var(--accent-soft); }
 .storage-form .unit { display: flex; align-items: center; gap: 6px; font-weight: normal; }
 .storage-form .unit input { width: 90px; }
 .storage-form label > input { max-width: 160px; }
+
+/* Install page */
+a.button { display: inline-block; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text, inherit); font-size: 14px; }
+a.button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.install-form label > input { max-width: none; }
+.install-form label.check > span { display: flex; gap: 8px; align-items: center; }
+.install-form label.check input { width: auto; }
+pre.code { white-space: pre-wrap; word-break: break-all; margin: 0 0 12px; }
+.places { display: grid; gap: 6px; margin-bottom: 8px; }
+.places details { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+.places summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.places details p { margin: 8px 0 0; }
+.agent-prompt { margin-bottom: 16px; }

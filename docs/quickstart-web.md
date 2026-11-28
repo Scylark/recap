@@ -53,7 +53,12 @@ later on the dashboard's **Storage** page.
 
 ## 4. Add the script tag (3 min)
 
-Put this in the `<head>` of every page you want counted:
+The quickest way: open the dashboard's **Install** page. It writes the tag below with your database address
+and key filled in, from your site's address and a few ticks, and says where to paste it in Google Tag
+Manager, WordPress, Webflow, Shopify, Framer, Squarespace and Wix. It also has a prompt to paste into a
+coding agent, and a button that checks whether your first visit has arrived.
+
+Or put this in the `<head>` of every page you want counted:
 
 ```html
 <script defer data-recap
@@ -101,6 +106,10 @@ list, recorded visits are marked and listed first.
    `Recap.optIn()` from your consent banner.
 3. If you ship an app with the same pages (Capacitor and similar), that file also has the App Store and
    Google Play label answers.
+
+Before you go live, read [what we learned putting Recap on a real product](learnings.md): where personal
+data hides in recordings (image addresses, `data-*` attributes, `aria-label`s), how big recordings get, and
+how to make opt-out work across tabs.
 
 Done. Day to day, everything is in the dashboard: sessions and replays, heatmaps, funnels, retention, and
 the Storage page for limits.

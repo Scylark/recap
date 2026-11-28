@@ -11,6 +11,7 @@ import { Overview } from './pages/Overview';
 import { SessionDetail } from './pages/SessionDetail';
 import { Sessions } from './pages/Sessions';
 import { Storage } from './pages/Storage';
+import { Install } from './pages/Install';
 
 const RANGES: { days: number; label: string }[] = [
   { days: 1, label: 'Last 24 hours' },
@@ -67,6 +68,7 @@ function SignedIn({ email }: { email: string }) {
   let body: ReactElement;
   if (page === 'members') body = <Members isAdmin={isAdmin} me={email} />;
   else if (page === 'storage') body = <Storage isAdmin={isAdmin} me={email} />;
+  else if (page === 'install') body = <Install appId={appId ?? ''} />;
   else if (!appId) {
     body = apps.loading ? (
       <p className="muted">Loading…</p>
@@ -74,10 +76,15 @@ function SignedIn({ email }: { email: string }) {
       <div className="card empty">
         <h3>Waiting for your first session</h3>
         <p>
-          Your database is connected, but no app has sent data yet. Add the Recap SDK to your app (see AGENTS.md in
-          the repo), open the app on a phone or simulator, then refresh this page.
+          Your database is connected, but no site or app has sent data yet. The Install page has the script tag for a
+          website, filled in for this database, and a prompt for your coding agent for a phone app.
         </p>
-        <button onClick={() => apps.reload()}>Refresh</button>
+        <div className="row">
+          <a className="button primary" href="#/install">
+            Install Recap
+          </a>
+          <button onClick={() => apps.reload()}>Refresh</button>
+        </div>
       </div>
     );
   } else if (page === 'session' && decoded) body = <SessionDetail id={decoded} isAdmin={isAdmin} />;
@@ -106,6 +113,7 @@ function SignedIn({ email }: { email: string }) {
           {nav('heatmaps', 'Heatmaps')}
           {nav('members', 'Team')}
           {nav('storage', 'Storage')}
+          {nav('install', 'Install')}
         </nav>
         <div className="controls">
           {(apps.data?.length ?? 0) > 1 && (
