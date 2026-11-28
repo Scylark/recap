@@ -37,7 +37,8 @@ function test(row: Row, col: string, expr: string): boolean {
       break;
     }
     case 'gte':
-      ok = String(v) >= val;
+      // Numbers compare as numbers (t_ms), everything else as text (ISO dates).
+      ok = typeof v === 'number' && val.trim() !== '' && Number.isFinite(Number(val)) ? v >= Number(val) : String(v) >= val;
       break;
     case 'is':
       ok = val === 'null' ? v == null : String(v) === val;
@@ -202,6 +203,8 @@ export const demoFetch: typeof fetch = async (input, init) => {
             ? (data.screenshots as unknown as Row[])
             : path === 'recap_frames'
               ? (data.frames as unknown as Row[])
+              : path === 'recap_dom'
+                ? (data.dom as unknown as Row[])
               : path === 'recap_settings'
                 ? [data.settings as unknown as Row]
                 : undefined;

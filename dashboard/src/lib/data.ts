@@ -1,4 +1,5 @@
 import { db } from './supabase';
+import type { TapRow } from './heatmap';
 import type { EventRow, Member, ScreenStat, SessionRow, TapPoint } from './types';
 
 function check<T>(res: { data: T | null; error: { message: string } | null }): T {
@@ -243,6 +244,138 @@ export async function getDomRecording(sessionId: string): Promise<{ events: DomE
   }
   events.sort((a, b) => a.timestamp - b.timestamp);
   return { events, startMs };
+}
+
+// ------------------------------------------------------------------ heatmaps
+
+/** Everything the Heatmaps page needs for one screen: taps, visits and how far each visit scrolled. */
+export interface ScreenActivity {
+  taps: TapRow[];
+  /** One entry per visit to the screen (session id and when, in the session's timeline). */
+  views: { sessionId: string; tMs: number }[];
+  /** The furthest each session scrolled on this screen, 0-100. */
+  maxDepth: Map<string, number>;
+  /** What each session said about its device, by session id. */
+  sessions: Map<string, HeatmapSession>;
+  /** True when there were more taps than the page reads (the newest are shown). */
+  capped: boolean;
+}
+
+export interface HeatmapSession {
+  id: string;
+  platform: string | null;
+  screen_width: number | null;
+  screen_height: number | null;
+  started_at: string;
+  has_recording?: boolean;
+}
+
+export const HEATMAP_TAP_LIMIT = 5000;
+
+async function sessionsById(ids: string[]): Promise<Map<string, HeatmapSession>> {
+  const out = new Map<string, HeatmapSession>();
+  const unique = [...new Set(ids)];
+  for (let i = 0; i < unique.length; i += 150) {
+    const chunk = unique.slice(i, i + 150);
+    const run = (withRecording: boolean) =>
+      db()
+        .from('recap_sessions')
+        .select(`id,platform,screen_width,screen_height,started_at${withRecording ? ',has_recording' : ''}`)
+        .in('id', chunk);
+    let res = await run(true);
+    if (res.error && /has_recording|42703/.test(`${res.error.message} ${(res.error as { code?: string }).code ?? ''}`)) res = await run(false);
+    for (const r of check(res) as unknown as HeatmapSession[]) out.set(r.id, r);
+  }
+  return out;
+}
+
+export async function screenActivity(appId: string, screen: string, since: string): Promise<ScreenActivity> {
+  const events = (type: 'tap' | 'screen' | 'scroll', select: string, limit: number) =>
+    db()
+      .from('recap_events')
+      .select(select)
+      .eq('app_id', appId)
+      .eq('type', type)
+      .eq('screen', screen)
+      .gte('at', since)
+      .order('at', { ascending: false })
+      .limit(limit);
+  const [tapRes, viewRes, scrollRes] = await Promise.all([
+    events('tap', 'session_id,t_ms,data', HEATMAP_TAP_LIMIT),
+    events('screen', 'session_id,t_ms', 10000),
+    events('scroll', 'session_id,data', 10000),
+  ]);
+  const taps = check(tapRes) as unknown as { session_id: string; t_ms: number; data: Record<string, unknown> }[];
+  const views = (check(viewRes) as unknown as { session_id: string; t_ms: number }[]).map((v) => ({ sessionId: v.session_id, tMs: v.t_ms }));
+  const maxDepth = new Map<string, number>();
+  for (const s of check(scrollRes) as unknown as { session_id: string; data: Record<string, unknown> }[]) {
+    const d = Number(s.data?.maxDepth ?? s.data?.depth ?? 0);
+    if (Number.isFinite(d)) maxDepth.set(s.session_id, Math.max(maxDepth.get(s.session_id) ?? 0, d));
+  }
+  const sessions = await sessionsById([...taps.map((t) => t.session_id), ...views.map((v) => v.sessionId)]);
+  return {
+    taps: taps.map((t) => {
+      const s = sessions.get(t.session_id);
+      return { sessionId: t.session_id, tMs: t.t_ms, platform: s?.platform ?? null, vw: s?.screen_width ?? null, vh: s?.screen_height ?? null, data: t.data ?? {} };
+    }),
+    views,
+    maxDepth,
+    sessions,
+    capped: taps.length >= HEATMAP_TAP_LIMIT,
+  };
+}
+
+/** A page as it was drawn: rrweb's meta event and full snapshot, from one recorded visit. */
+export interface PageSnapshot {
+  sessionId: string;
+  startedAt: string;
+  events: DomEvent[];
+  width: number;
+  height: number;
+}
+
+/**
+ * The newest recording of this screen among these visits: the first full snapshot rrweb took after
+ * the visit opened the screen. Tries a few visits, newest first, and reads only the chunks around
+ * the screen view, so it stays small.
+ */
+export async function pageSnapshotFor(
+  visits: { sessionId: string; tMs: number; startedAt: string }[],
+  tries = 4,
+): Promise<PageSnapshot | null> {
+  const ordered = [...visits].sort((a, b) => Date.parse(b.startedAt) + b.tMs - (Date.parse(a.startedAt) + a.tMs));
+  const seen = new Set<string>();
+  let attempts = 0;
+  for (const v of ordered) {
+    if (attempts >= tries) break;
+    const key = `${v.sessionId}:${v.tMs}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    attempts++;
+    const res = await db()
+      .from('recap_dom')
+      .select('t_ms,events')
+      .eq('session_id', v.sessionId)
+      .gte('t_ms', Math.max(0, v.tMs - 3000))
+      .order('t_ms', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(12);
+    if (res.error) return null; // older databases without web recordings
+    const events: DomEvent[] = [];
+    for (const r of (res.data ?? []) as { events: DomEvent[] }[]) if (Array.isArray(r.events)) events.push(...r.events);
+    events.sort((a, b) => a.timestamp - b.timestamp);
+    // rrweb's clock and the session's are the same browser's: skip a snapshot of the screen before.
+    const viewedAt = Date.parse(v.startedAt) + v.tMs;
+    const fullAt = events.findIndex((e) => e.type === 2 && (!Number.isFinite(viewedAt) || e.timestamp >= viewedAt - 1000));
+    if (fullAt < 0) continue;
+    let meta: DomEvent | undefined;
+    for (let i = fullAt - 1; i >= 0; i--) if (events[i]!.type === 4) (meta = events[i]), (i = -1);
+    const m = (meta?.data ?? {}) as { width?: number; height?: number; href?: string };
+    const full = events[fullAt]!;
+    if (!meta) meta = { type: 4, timestamp: full.timestamp - 1, data: { href: 'about:blank', width: 0, height: 0 } };
+    return { sessionId: v.sessionId, startedAt: v.startedAt, events: [meta, full], width: Number(m.width) || 0, height: Number(m.height) || 0 };
+  }
+  return null;
 }
 
 export interface LabelCount {
