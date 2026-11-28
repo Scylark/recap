@@ -8,6 +8,7 @@ import {
   busiestDevice,
   countByDevice,
   deviceClass,
+  isDeadTap,
   layoutViewport,
   rageTaps,
   scrollReach,
@@ -17,18 +18,19 @@ import {
 import { go, useAsync } from '../lib/util';
 import { Empty } from './Overview';
 
-export function Heatmaps({ appId, since, screen }: { appId: string; since: string; screen?: string }) {
+export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: string; since: string; screen?: string; device?: string }) {
   const screens = useAsync(() => screenStats(appId, since), [appId, since]);
   const current = screen ?? screens.data?.[0]?.screen;
   const activity = useAsync(
     () => (current ? screenActivity(appId, current, since) : Promise.resolve(null)),
     [appId, since, current],
   );
-  const [device, setDevice] = useState<DeviceClass | null>(null);
+  // The device size is in the address (heatmaps/<screen>/<device>), so a shared link opens the same view.
+  const device = DEVICE_CLASSES.some((d) => d.key === deviceArg) ? (deviceArg as DeviceClass) : null;
+  const setDevice = (d: DeviceClass) => current && go(`heatmaps/${encodeURIComponent(current)}/${d}`);
   const [names, setNames] = useState<Map<string, string>>(new Map());
   const [highlight, setHighlight] = useState<string | null>(null);
   useEffect(() => {
-    setDevice(null);
     setNames(new Map());
     setHighlight(null);
   }, [appId, current]);
@@ -53,6 +55,7 @@ export function Heatmaps({ appId, since, screen }: { appId: string; since: strin
     [visits, activity.data],
   );
   const rage = useMemo(() => rageTaps(here), [here]);
+  const dead = useMemo(() => here.filter(isDeadTap), [here]);
   const targets = useMemo(() => topTargets(here, (sel) => names.get(sel) ?? null), [here, names]);
 
   // The page behind the taps: the newest recorded visit at this size.
@@ -83,10 +86,14 @@ export function Heatmaps({ appId, since, screen }: { appId: string; since: strin
     <>
       <h2>Heatmaps</h2>
       <div className="filters">
-        <select value={current ?? ''} onChange={(e) => go(`heatmaps/${encodeURIComponent(e.target.value)}`)}>
+        <select
+          aria-label="Screen"
+          value={current ?? ''}
+          onChange={(e) => go(`heatmaps/${encodeURIComponent(e.target.value)}${device ? `/${device}` : ''}`)}
+        >
           {(screens.data ?? []).map((s) => (
             <option key={s.screen} value={s.screen}>
-              {s.screen} ({s.taps} taps)
+              {s.screen} · {s.views.toLocaleString()} views, {s.taps.toLocaleString()} taps
             </option>
           ))}
         </select>
@@ -110,11 +117,18 @@ export function Heatmaps({ appId, since, screen }: { appId: string; since: strin
         <Kpi label="Visits" value={loading ? '…' : visitCount.toLocaleString()} />
         <Kpi label="Taps" value={loading ? '…' : here.length.toLocaleString()} />
         {web && <Kpi label="Scrolled halfway" value={loading || !visitCount ? '–' : `${Math.round((half?.share ?? 0) * 100)}%`} />}
-        <Kpi label="Rage taps" value={loading ? '…' : rage.length.toLocaleString()} />
+        <Kpi label="Rage taps" value={loading ? '…' : rage.length.toLocaleString()} hint="Three or more quick taps on one spot in one visit: something that didn't respond" />
+        {web && (
+          <Kpi
+            label="Dead taps"
+            value={loading ? '…' : here.length ? `${Math.round((dead.length / here.length) * 100)}%` : '–'}
+            hint="Taps on things that aren't links, buttons or form fields: people expected them to do something"
+          />
+        )}
       </div>
 
       <div className="pair heat-pair">
-        <div className={web ? 'heat-main' : ''}>
+        <div className={web ? 'heat-main' : ''} style={web ? { width: `min(100%, ${Math.round(snapshot.data?.width || viewport.width)}px)` } : undefined}>
           {web ? (
             <PageHeatmap
               taps={here}
@@ -171,6 +185,13 @@ export function Heatmaps({ appId, since, screen }: { appId: string; since: strin
           )}
           {targets.length > 0 && (
             <table className="clickable">
+              <thead>
+                <tr>
+                  <th>Element</th>
+                  <th className="num">Taps</th>
+                  <th className="num">Of visits</th>
+                </tr>
+              </thead>
               <tbody>
                 {targets.slice(0, 15).map((t) => (
                   <tr
@@ -180,9 +201,13 @@ export function Heatmaps({ appId, since, screen }: { appId: string; since: strin
                     onMouseLeave={() => setHighlight(null)}
                     onClick={() => setHighlight((h) => (h === t.key ? null : t.key))}
                   >
-                    <td title={t.key.startsWith('sel:') ? t.key.slice(4) : undefined}>{t.name}</td>
+                    <td title={t.key.startsWith('sel:') ? t.key.slice(4) : undefined}>
+                      {t.name} {t.dead && <span className="pill warn" title="Not a link, button or form field">dead</span>}
+                    </td>
                     <td className="num">{t.count.toLocaleString()}</td>
-                    <td className="num muted">{here.length ? `${Math.round((t.count / here.length) * 100)}%` : ''}</td>
+                    <td className="num muted" title="Share of visits that tapped it">
+                      {visitCount ? `${Math.round((t.visits / visitCount) * 100)}%` : ''}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -209,9 +234,9 @@ export function Heatmaps({ appId, since, screen }: { appId: string; since: strin
   );
 }
 
-function Kpi({ label, value }: { label: string; value: string }) {
+function Kpi({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="kpi">
+    <div className="kpi" title={hint}>
       <div className="kpi-label">{label}</div>
       <div className="kpi-value">{value}</div>
     </div>

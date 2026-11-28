@@ -258,15 +258,46 @@ export function rageTaps(taps: Tap[], windowMs = 1000, radius = 30, min = 3): Ta
   return out;
 }
 
+/** What a page can be tapped to do. Anything else tapped is a "dead" tap: it looked tappable and wasn't. */
+const INTERACTIVE = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL', 'SUMMARY', 'OPTION', 'VIDEO', 'AUDIO']);
+
+/**
+ * A web tap on something that isn't a link, button or form field, and has no data-ut-label. The web
+ * script reports the nearest link or button around what was hit, so a tap that still lands on a
+ * <div> or a price found nothing to do. App taps don't say what they hit, so they never count.
+ */
+export function isDeadTap(t: Tap): boolean {
+  return t.web && !!t.tag && !t.label && !INTERACTIVE.has(t.tag.toUpperCase());
+}
+
+export interface Target {
+  key: string;
+  name: string;
+  count: number;
+  /** Visits that tapped it at least once. */
+  visits: number;
+  /** Not a link, button or form field (see isDeadTap). */
+  dead: boolean;
+}
+
+/** The key a tap is grouped under: its label when the page names it, else its selector. */
+export const targetKey = (t: Tap): string | null => (t.label ? `label:${t.label}` : t.selector ? `sel:${t.selector}` : null);
+
 /** Elements tapped most, by label when the page names them, else by the element's selector. */
-export function topTargets(taps: Tap[], name?: (selector: string) => string | null): { key: string; name: string; count: number }[] {
-  const counts = new Map<string, { name: string; count: number }>();
+export function topTargets(taps: Tap[], name?: (selector: string) => string | null): Target[] {
+  const out = new Map<string, Target & { sessions: Set<string> }>();
   for (const t of taps) {
-    const key = t.label ? `label:${t.label}` : t.selector ? `sel:${t.selector}` : null;
+    const key = targetKey(t);
     if (!key) continue;
-    const prev = counts.get(key);
-    if (prev) prev.count++;
-    else counts.set(key, { name: t.label ?? (t.selector ? name?.(t.selector) ?? t.selector : ''), count: 1 });
+    let v = out.get(key);
+    if (!v) {
+      v = { key, name: t.label ?? (t.selector ? name?.(t.selector) ?? t.selector : ''), count: 0, visits: 0, dead: isDeadTap(t), sessions: new Set() };
+      out.set(key, v);
+    }
+    v.count++;
+    v.sessions.add(t.sessionId);
   }
-  return [...counts.entries()].map(([key, v]) => ({ key, ...v })).sort((a, b) => b.count - a.count);
+  return [...out.values()]
+    .map(({ sessions, ...v }) => ({ ...v, visits: sessions.size }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }

@@ -152,9 +152,9 @@ table.clickable tbody tr:hover { background: var(--accent-soft); }
 .phone-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
 
 /* Web page heatmap: the whole page at its own width, scaled to fit, with heat and scroll lines over it. */
-.pair.heat-pair > .heat-main { max-width: none; flex: 1 1 420px; min-width: 0; }
-.heat-kpis { max-width: 760px; }
-.page-map-box { width: 100%; }
+.pair.heat-pair > .heat-main { max-width: none; flex: 0 1 auto; min-width: 0; }
+.heat-kpis { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); max-width: 900px; }
+.page-map-box { max-width: 100%; }
 .page-map {
   position: relative; overflow: hidden; margin: 0 auto 8px;
   border: 1px solid var(--line); border-radius: 12px; background: #fff;
@@ -180,6 +180,7 @@ table.clickable tbody tr:hover { background: var(--accent-soft); }
 .page-map-line.fold span { background: var(--accent); }
 .page-map-rage { position: absolute; width: 30px; height: 30px; margin: -15px 0 0 -15px; border: 3px solid #e11d48; border-radius: 50%; box-shadow: 0 0 0 2px #fff; }
 .page-map-hot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--accent); }
+.page-map-note { position: absolute; left: 8px; right: 8px; top: 8px; padding: 6px 8px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); font-size: 12px; }
 .page-map-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
 table.clickable tbody tr.on { background: var(--accent-soft); }
 .seg button:disabled { opacity: 0.45; cursor: default; }

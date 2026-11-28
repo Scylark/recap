@@ -1,6 +1,6 @@
 import { db } from './supabase';
 import type { TapRow } from './heatmap';
-import type { EventRow, Member, ScreenStat, SessionRow, TapPoint } from './types';
+import type { EventRow, Member, ScreenStat, SessionRow } from './types';
 
 function check<T>(res: { data: T | null; error: { message: string } | null }): T {
   if (res.error) throw new Error(res.error.message);
@@ -131,20 +131,6 @@ export async function totals(appId: string, since: string): Promise<Totals> {
     platforms[p] = (platforms[p] ?? 0) + 1;
   }
   return { sessions: rows.length, avgDurationSec: dur / n, avgScreens: screens / n, taps, platforms };
-}
-
-export async function tapsOnScreen(appId: string, screen: string, since: string): Promise<TapPoint[]> {
-  const rows = check(
-    await db()
-      .from('recap_events')
-      .select('data')
-      .eq('app_id', appId)
-      .eq('type', 'tap')
-      .eq('screen', screen)
-      .gte('at', since)
-      .limit(5000),
-  ) as { data: Record<string, unknown> }[];
-  return rows.map((r) => ({ nx: Number(r.data.nx ?? 0), ny: Number(r.data.ny ?? 0) }));
 }
 
 export interface Screenshot {
@@ -376,31 +362,6 @@ export async function pageSnapshotFor(
     return { sessionId: v.sessionId, startedAt: v.startedAt, events: [meta, full], width: Number(m.width) || 0, height: Number(m.height) || 0 };
   }
   return null;
-}
-
-export interface LabelCount {
-  label: string;
-  count: number;
-}
-
-export async function topLabels(appId: string, screen: string, since: string): Promise<LabelCount[]> {
-  const rows = check(
-    await db()
-      .from('recap_events')
-      .select('data')
-      .eq('app_id', appId)
-      .eq('type', 'tap')
-      .eq('screen', screen)
-      .gte('at', since)
-      .not('data->>label', 'is', null)
-      .limit(5000),
-  ) as { data: Record<string, unknown> }[];
-  const counts = new Map<string, number>();
-  for (const r of rows) {
-    const l = String(r.data.label);
-    counts.set(l, (counts.get(l) ?? 0) + 1);
-  }
-  return [...counts.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
 }
 
 export async function listMembers(): Promise<Member[]> {

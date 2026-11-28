@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Replayer } from 'rrweb';
 import 'rrweb/dist/style.css';
 import type { PageSnapshot } from '../lib/data';
-import { type Anchor, type Tap, depthToY, pageHeightFromTaps, placeWebTap } from '../lib/heatmap';
+import { type Anchor, type Tap, depthToY, pageHeightFromTaps, placeWebTap, targetKey } from '../lib/heatmap';
 import { elementName, tallPageEvents } from '../lib/snapshot';
 import { drawHeat } from './heat';
 
@@ -123,7 +123,7 @@ export function PageHeatmap({ taps, snapshot, viewport, reach, rage, onNames, hi
     [taps, width, pageHeight, page],
   );
   const hot = useMemo(
-    () => (highlight ? placed.filter((p) => (p.tap.label ? `label:${p.tap.label}` : `sel:${p.tap.selector}`) === highlight) : []),
+    () => (highlight ? placed.filter((p) => targetKey(p.tap) === highlight) : []),
     [placed, highlight],
   );
 
@@ -139,7 +139,7 @@ export function PageHeatmap({ taps, snapshot, viewport, reach, rage, onNames, hi
   );
 
   return (
-    <div ref={box} className="page-map-box">
+    <div ref={box} className="page-map-box" style={{ width: `min(100%, ${width}px)` }}>
       <div className="page-map" style={{ width: width * scale, height: pageHeight * scale }}>
         <div className="page-map-inner" style={{ width, height: pageHeight, transform: `scale(${scale})` }}>
           <div ref={holder} className="page-map-page" aria-hidden="true" />
@@ -155,7 +155,7 @@ export function PageHeatmap({ taps, snapshot, viewport, reach, rage, onNames, hi
         <div className="page-map-marks">
           {foldCss < pageHeight && (
             <div className="page-map-line fold" style={{ top: foldCss * scale }}>
-              <span>Fold · everyone sees above</span>
+              <span>Fold: seen without scrolling</span>
             </div>
           )}
           {reach
@@ -165,7 +165,7 @@ export function PageHeatmap({ taps, snapshot, viewport, reach, rage, onNames, hi
               return (
                 <div key={r.depth} className="page-map-line" style={{ top: Math.max(0, y - 1) }}>
                   <span>
-                    {Math.round(r.share * 100)}% reached {r.depth === 100 ? 'the end' : `${r.depth}% down`}
+                    {Math.round(r.share * 100)}% {r.depth === 100 ? 'reached the end' : 'scrolled this far'}
                   </span>
                 </div>
               );
@@ -177,6 +177,7 @@ export function PageHeatmap({ taps, snapshot, viewport, reach, rage, onNames, hi
             <div key={i} className="page-map-hot" style={{ left: p.x * scale, top: p.y * scale }} />
           ))}
           {taps.length === 0 && <div className="page-map-empty">No taps on this screen at this size</div>}
+          {failed && <div className="page-map-note">The recorded page couldn't be drawn, so the taps are on a blank page.</div>}
         </div>
       </div>
     </div>

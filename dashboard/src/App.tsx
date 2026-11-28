@@ -84,7 +84,8 @@ function SignedIn({ email }: { email: string }) {
   else if (page === 'sessions') body = <Sessions appId={appId} since={since} {...(decoded ? { screen: decoded } : {})} />;
   else if (page === 'analytics')
     body = <Analytics appId={appId} since={since} days={days} {...(arg ? { tab: arg } : {})} {...(arg2 ? { arg: decodeURIComponent(arg2) } : {})} />;
-  else if (page === 'heatmaps') body = <Heatmaps appId={appId} since={since} {...(decoded ? { screen: decoded } : {})} />;
+  else if (page === 'heatmaps')
+    body = <Heatmaps appId={appId} since={since} {...(decoded ? { screen: decoded } : {})} {...(arg2 ? { device: arg2 } : {})} />;
   else body = <Overview appId={appId} since={since} rangeLabel={rangeLabel} />;
 
   return (
