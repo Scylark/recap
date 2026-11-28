@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { db } from '../lib/supabase';
+import { useAsync } from '../lib/util';
 
 export function Login() {
   const [email, setEmail] = useState('');
@@ -63,18 +64,32 @@ export function Login() {
 }
 
 export function NotMember({ email, onSignOut }: { email: string; onSignOut: () => void }) {
+  // Only offer the "make yourself admin" SQL while the team has no admin at all (first set-up).
+  const hasAdmin = useAsync(async () => {
+    const res = await db().rpc('recap_has_admin');
+    if (res.error) throw new Error(res.error.message);
+    return res.data as boolean;
+  }, []);
+  const sqlEmail = email.replace(/'/g, "''");
   return (
     <div className="centre">
       <div className="card login">
         <h1>No access yet</h1>
         <p>
-          You're signed in as <strong>{email}</strong>, but this email isn't on the Recap team list.
+          You're signed in as <strong>{email}</strong>, but this email isn't on the Recap team list, or it hasn't been
+          confirmed yet. If you signed up with a password, open the confirmation email first.
         </p>
-        <p className="muted">
-          Ask an admin to add you on the Team page. If you're setting Recap up for the first time, run this in
-          the Supabase SQL editor:
-        </p>
-        <pre className="code">{`insert into public.recap_members (email, role)\nvalues ('${email}', 'admin');`}</pre>
+        {hasAdmin.data === false ? (
+          <>
+            <p className="muted">
+              This team has no admin yet. If you're setting Recap up, run this in the Supabase SQL editor to make yourself
+              the first admin:
+            </p>
+            <pre className="code">{`insert into public.recap_members (email, role)\nvalues ('${sqlEmail}', 'admin');`}</pre>
+          </>
+        ) : (
+          <p className="muted">Ask an admin to add you on the Team page.</p>
+        )}
         <button onClick={onSignOut}>Sign out</button>
       </div>
     </div>

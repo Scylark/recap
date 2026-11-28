@@ -48,7 +48,7 @@ export function Replay({ events, durationMs, pictures, frames = [], aspect = 2.1
       const near = list.filter(
         (o, j) => j !== i && Math.abs(o.t_ms - e.t_ms) < 1000 && Math.hypot(Number(o.data.nx ?? 0) - nx, Number(o.data.ny ?? 0) - ny) < 0.08,
       );
-      return { t: e.t_ms, nx, ny, label: (e.data.label as string) ?? null, rage: near.length >= 2 };
+      return { t: e.t_ms, nx, ny, label: typeof e.data.label === 'string' ? e.data.label : null, rage: near.length >= 2 };
     });
   }, [sorted]);
 

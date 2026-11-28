@@ -14,7 +14,9 @@ export const supabase: SupabaseClient | null = isDemo
       global: { fetch: (input, init) => import('../demo/fetch').then((m) => m.demoFetch(input, init)) },
     })
   : isConfigured
-    ? createClient(url!, anonKey!, { auth: { persistSession: true, detectSessionInUrl: true } })
+    ? // PKCE: a sign-in link only works in the browser that asked for it, so a link carrying someone
+      // else's session can't sign you in as them.
+      createClient(url!, anonKey!, { auth: { persistSession: true, detectSessionInUrl: true, flowType: 'pkce' } })
     : null;
 
 export function db(): SupabaseClient {

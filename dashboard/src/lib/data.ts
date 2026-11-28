@@ -50,7 +50,7 @@ export async function listSessions(f: SessionFilter): Promise<SessionPage> {
     if (f.platform) q = q.eq('platform', f.platform);
     if (f.userId) q = q.ilike('user_id', `%${f.userId}%`);
     if (f.screen) {
-      const v = `"${f.screen.replace(/"/g, '\\"')}"`;
+      const v = `"${f.screen.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
       q = q.or(`first_screen.eq.${v},last_screen.eq.${v}`);
     }
     return q;

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { Heatmap } from '../components/Heatmap';
 import { Replay } from '../components/Replay';
 import { WebReplay } from '../components/WebReplay';
@@ -153,18 +154,20 @@ function Detail({
           site with <code>?recap=record</code>.
         </p>
       )}
-      {dom.data && dom.data.events.length > 1 ? (
-        <WebReplay events={events} recording={dom.data.events} startMs={dom.data.startMs} describe={describe} />
-      ) : (
-      <Replay
-        events={events}
-        durationMs={duration * 1000}
-        pictures={pictures.data ?? {}}
-        frames={frames.data ?? []}
-        describe={describe}
-        {...(aspect ? { aspect } : {})}
-      />
-      )}
+      <ErrorBoundary what="replay">
+        {dom.data && dom.data.events.length > 1 ? (
+          <WebReplay events={events} recording={dom.data.events} startMs={dom.data.startMs} describe={describe} />
+        ) : (
+          <Replay
+            events={events}
+            durationMs={duration * 1000}
+            pictures={pictures.data ?? {}}
+            frames={frames.data ?? []}
+            describe={describe}
+            {...(aspect ? { aspect } : {})}
+          />
+        )}
+      </ErrorBoundary>
 
       <h3>Screen by screen</h3>
 
