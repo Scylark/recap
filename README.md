@@ -20,6 +20,18 @@
 
 Try Recap on a live prototype at **[recap-ux.com](https://recap-ux.com)**. The site itself is instrumented with Recap, so click around, then press `Alt+Shift+Y` to see your own session as a heatmap.
 
+## Get started
+
+| You have | Start here | Time |
+| --- | --- | --- |
+| A live website, and no developer to hand | [Recap on a live website in 30 minutes](./docs/quickstart-web.md): a free database, a dashboard, then one tag. The dashboard's **Install** page writes the tag for you and says where to paste it in Google Tag Manager, WordPress, Webflow, Shopify, Framer, Squarespace or Wix. | 30 min |
+| A coding agent (Claude Code, Cursor, Codex) | Steps 1 to 3 of the same guide, then copy the prompt from the dashboard's **Install → With a coding agent** tab into your agent. | 20 min |
+| A React Native or Expo app | Ask your coding agent to follow [AGENTS.md](./AGENTS.md). | 30 min |
+| A prototype to test with people, no backend | [Quick start](#quick-start): one script tag, data stays in the browser. | 1 min |
+
+Putting Recap on a real product? Read [what we learned doing it](./docs/learnings.md) first: where personal
+data hides in recordings, storage sizes, opt-out, Capacitor apps and store labels.
+
 ## Why Recap
 
 **One line of HTML.** No accounts, no keys, no dashboards to configure. Add the script tag and you're recording.

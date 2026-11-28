@@ -280,6 +280,10 @@ network access. Upload errors are logged when `debug` is on.
 
 ## Websites and web apps
 
+Read [docs/learnings.md](docs/learnings.md) before step 4 below: it lists where personal data turned up in a
+real install's recordings and how it was fixed. The owner's dashboard also has an **Install** page that
+generates the script tag with their URL and key filled in.
+
 If the developer also has a website or web app, it can report to the same database and dashboard. The web
 script's defaults are made for a live site, so **don't write a loader or wrapper around it**: limiting it to
 production hostnames, skipping private pages, Global Privacy Control, iframes, consent, test switches and
