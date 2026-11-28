@@ -37,9 +37,14 @@ function test(row: Row, col: string, expr: string): boolean {
       break;
     }
     case 'gte':
+    case 'gt':
+    case 'lt': {
       // Numbers compare as numbers (t_ms), everything else as text (ISO dates).
-      ok = typeof v === 'number' && val.trim() !== '' && Number.isFinite(Number(val)) ? v >= Number(val) : String(v) >= val;
+      const numeric = typeof v === 'number' && val.trim() !== '' && Number.isFinite(Number(val));
+      const c = numeric ? (v as number) - Number(val) : String(v) < val ? -1 : String(v) > val ? 1 : 0;
+      ok = op === 'gte' ? c >= 0 : op === 'gt' ? c > 0 : c < 0;
       break;
+    }
     case 'is':
       ok = val === 'null' ? v == null : String(v) === val;
       break;

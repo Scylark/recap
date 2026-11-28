@@ -21,8 +21,11 @@ export function colour(v: number): [number, number, number] {
   return STOPS[STOPS.length - 1]![1];
 }
 
-/** The most canvas pixels drawn: past this the map draws at a lower resolution rather than fail. */
-const MAX_PIXELS = 24_000_000;
+/**
+ * The most canvas pixels drawn: past this the map draws at a lower resolution rather than fail.
+ * iOS Safari refuses a canvas over about 16.7 million pixels.
+ */
+const MAX_PIXELS = 16_000_000;
 
 /**
  * Draw `points` (CSS px within width × height) onto `canvas`, sized to those CSS px. Returns the
@@ -39,7 +42,8 @@ export function drawHeat(
   const dpr = Math.max(0.25, Math.min(want, Math.sqrt(MAX_PIXELS / Math.max(1, width * height))));
   canvas.width = Math.max(1, Math.round(width * dpr));
   canvas.height = Math.max(1, Math.round(height * dpr));
-  const ctx = canvas.getContext('2d');
+  // The colour pass reads the whole canvas back once per draw.
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);

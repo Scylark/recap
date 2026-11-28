@@ -55,3 +55,12 @@ can read more than 5,000 taps.
 **What:** Find the element that scrolls (the largest with `overflow: auto|scroll` and a scroll height
 larger than its own), and report scroll depth and tap positions against it.
 
+## Web heatmaps: a picture of single-page-app screens
+
+**Why:** The web script takes a full snapshot when a page loads. A screen reached by client-side
+navigation has none of its own, so its heatmap is drawn on a blank page.
+
+**What:** Replay the recording forward from the landing page's snapshot to the moment the screen was
+shown, and draw that state. rrweb's Replayer can play to a time (`pause(t)`); the work is choosing the
+moment (the screen event's time, plus a short settle) and reading only the chunks up to it.
+

@@ -1,5 +1,5 @@
 import { db } from './supabase';
-import type { TapRow } from './heatmap';
+import { recordingOrder, type RecordedVisit, type TapRow } from './heatmap';
 import type { EventRow, Member, ScreenStat, SessionRow } from './types';
 
 function check<T>(res: { data: T | null; error: { message: string } | null }): T {
@@ -234,6 +234,29 @@ export async function getDomRecording(sessionId: string): Promise<{ events: DomE
 
 // ------------------------------------------------------------------ heatmaps
 
+/** Supabase answers at most 1,000 rows a request, whatever the limit asked for. */
+const PAGE = 1000;
+
+/**
+ * Read up to `max` rows in pages of 1,000, newest first. `capped` is true when there were more.
+ * `page(from, to)` builds the query for one page (it must order the same way every time).
+ */
+async function readPaged<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
+  max: number,
+): Promise<{ rows: T[]; capped: boolean }> {
+  const rows: T[] = [];
+  for (let from = 0; from < max; from += PAGE) {
+    const to = Math.min(max, from + PAGE) - 1;
+    const res = await page(from, to);
+    if (res.error) throw new Error(res.error.message);
+    const got = (res.data ?? []) as T[];
+    rows.push(...got);
+    if (got.length < to - from + 1) return { rows, capped: false };
+  }
+  return { rows, capped: true };
+}
+
 /** Everything the Heatmaps page needs for one screen: taps, visits and how far each visit scrolled. */
 export interface ScreenActivity {
   taps: TapRow[];
@@ -243,8 +266,9 @@ export interface ScreenActivity {
   maxDepth: Map<string, number>;
   /** What each session said about its device, by session id. */
   sessions: Map<string, HeatmapSession>;
-  /** True when there were more taps than the page reads (the newest are shown). */
+  /** True when the period held more than the page reads: then taps, views and scrolls all start at `from`. */
   capped: boolean;
+  from: string;
 }
 
 export interface HeatmapSession {
@@ -257,6 +281,8 @@ export interface HeatmapSession {
 }
 
 export const HEATMAP_TAP_LIMIT = 5000;
+export const HEATMAP_VIEW_LIMIT = 5000;
+const HEATMAP_SCROLL_LIMIT = 10000;
 
 /** Sessions by id, 150 to a request and six requests at a time (a busy screen has thousands). */
 async function sessionsById(ids: string[]): Promise<Map<string, HeatmapSession>> {
@@ -282,41 +308,68 @@ async function sessionsById(ids: string[]): Promise<Map<string, HeatmapSession>>
   return out;
 }
 
+export interface EventSessions {
+  sessions: Set<string>;
+  /** True when there were more events than were read, so some sessions may be missing. */
+  capped: boolean;
+}
+
 /** Sessions in the period that sent this custom event (for "visits that signed up" and the like). */
-export async function sessionsWithEvent(appId: string, name: string, since: string): Promise<Set<string>> {
-  const rows = check(
-    await db()
-      .from('recap_events')
-      .select('session_id')
-      .eq('app_id', appId)
-      .eq('type', 'custom')
-      .eq('data->>name', name)
-      .gte('at', since)
-      .limit(20000),
-  ) as { session_id: string }[];
-  return new Set(rows.map((r) => r.session_id));
+export async function sessionsWithEvent(appId: string, name: string, since: string): Promise<EventSessions> {
+  const { rows, capped } = await readPaged<{ session_id: string }>(
+    (from, to) =>
+      db()
+        .from('recap_events')
+        .select('session_id')
+        .eq('app_id', appId)
+        .eq('type', 'custom')
+        .eq('data->>name', name)
+        .gte('at', since)
+        .order('at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to),
+    50000,
+  );
+  return { sessions: new Set(rows.map((r) => r.session_id)), capped };
 }
 
 export async function screenActivity(appId: string, screen: string, since: string): Promise<ScreenActivity> {
-  const events = (type: 'tap' | 'screen' | 'scroll', select: string, limit: number) =>
-    db()
-      .from('recap_events')
-      .select(select)
-      .eq('app_id', appId)
-      .eq('type', type)
-      .eq('screen', screen)
-      .gte('at', since)
-      .order('at', { ascending: false })
-      .limit(limit);
+  const events = <T>(type: 'tap' | 'screen' | 'scroll', select: string, max: number) =>
+    readPaged<T>(
+      (from, to) =>
+        db()
+          .from('recap_events')
+          .select(select)
+          .eq('app_id', appId)
+          .eq('type', type)
+          .eq('screen', screen)
+          .gte('at', since)
+          .order('at', { ascending: false })
+          .order('id', { ascending: false })
+          .range(from, to),
+      max,
+    );
+  type Tap = { session_id: string; t_ms: number; at: string; data: Record<string, unknown> };
+  type View = { session_id: string; t_ms: number; at: string };
+  type Scroll = { session_id: string; at: string; data: Record<string, unknown> };
   const [tapRes, viewRes, scrollRes] = await Promise.all([
-    events('tap', 'session_id,t_ms,data', HEATMAP_TAP_LIMIT),
-    events('screen', 'session_id,t_ms', 5000),
-    events('scroll', 'session_id,data', 10000),
+    events<Tap>('tap', 'session_id,t_ms,at,data', HEATMAP_TAP_LIMIT),
+    events<View>('screen', 'session_id,t_ms,at', HEATMAP_VIEW_LIMIT),
+    events<Scroll>('scroll', 'session_id,at,data', HEATMAP_SCROLL_LIMIT),
   ]);
-  const taps = check(tapRes) as unknown as { session_id: string; t_ms: number; data: Record<string, unknown> }[];
-  const views = (check(viewRes) as unknown as { session_id: string; t_ms: number }[]).map((v) => ({ sessionId: v.session_id, tMs: v.t_ms }));
+  // When a list stopped short, all three start where the shortest one did, so "of visits" and
+  // "how far down" compare the same visits.
+  let from = since;
+  for (const r of [tapRes, viewRes, scrollRes] as { rows: { at: string }[]; capped: boolean }[])
+    if (r.capped && r.rows.length) {
+      const oldest = r.rows[r.rows.length - 1]!.at;
+      if (oldest > from) from = oldest;
+    }
+  const inSpan = <T extends { at: string }>(rows: T[]) => (from === since ? rows : rows.filter((r) => r.at >= from));
+  const taps = inSpan(tapRes.rows);
+  const views = inSpan(viewRes.rows).map((v) => ({ sessionId: v.session_id, tMs: v.t_ms }));
   const maxDepth = new Map<string, number>();
-  for (const s of check(scrollRes) as unknown as { session_id: string; data: Record<string, unknown> }[]) {
+  for (const s of inSpan(scrollRes.rows)) {
     const d = Number(s.data?.maxDepth ?? s.data?.depth ?? 0);
     if (Number.isFinite(d)) maxDepth.set(s.session_id, Math.max(maxDepth.get(s.session_id) ?? 0, d));
   }
@@ -329,7 +382,8 @@ export async function screenActivity(appId: string, screen: string, since: strin
     views,
     maxDepth,
     sessions,
-    capped: taps.length >= HEATMAP_TAP_LIMIT,
+    capped: tapRes.capped || viewRes.capped || scrollRes.capped,
+    from,
   };
 }
 
@@ -340,47 +394,59 @@ export interface PageSnapshot {
   events: DomEvent[];
   width: number;
   height: number;
-  /** Where this visit is in the newest-first list, so the page can ask for the next one. */
+  /** Where this visit is in the list tried, so the page can ask for the next one. */
   index: number;
 }
 
 /**
- * The newest recording of this screen among these visits: the first full snapshot rrweb took after
- * the visit opened the screen. Tries a few visits, newest first, and reads only the chunks around
- * the screen view, so it stays small.
+ * A recording of this screen: the full snapshot rrweb took when the screen loaded, from the first
+ * visit in `recordingOrder` (starting at `from`) that has one. The web script takes a full snapshot
+ * when a page loads, so a screen reached without a page load (a single-page app) has none of its own.
+ * Each try reads at most two chunks, between the view and the visit's next screen.
  */
 export async function pageSnapshotFor(
-  visits: { sessionId: string; tMs: number; startedAt: string }[],
+  visits: RecordedVisit[],
   from = 0,
-  tries = 4,
+  width?: number | null,
+  tries = 8,
 ): Promise<PageSnapshot | null> {
-  const seen = new Set<string>();
-  const ordered = [...visits]
-    .sort((a, b) => Date.parse(b.startedAt) + b.tMs - (Date.parse(a.startedAt) + a.tMs))
-    .filter((v) => {
-      const key = `${v.sessionId}:${v.tMs}`;
-      return seen.has(key) ? false : (seen.add(key), true);
-    });
+  const ordered = recordingOrder(visits, width);
   let attempts = 0;
-  for (let index = Math.max(0, from); index < ordered.length; index++) {
+  for (let index = Math.max(0, from); index < ordered.length && attempts < tries; index++) {
     const v = ordered[index]!;
-    if (attempts >= tries) break;
     attempts++;
-    const res = await db()
+    // Where the visit went next, so a snapshot of the next screen isn't taken for this one.
+    let untilMs = v.untilMs;
+    if (untilMs === undefined) {
+      const next = await db()
+        .from('recap_events')
+        .select('t_ms')
+        .eq('session_id', v.sessionId)
+        .eq('type', 'screen')
+        .gt('t_ms', v.tMs)
+        .order('t_ms', { ascending: true })
+        .limit(1);
+      const row = ((next.data ?? []) as { t_ms: number }[])[0];
+      if (row) untilMs = row.t_ms;
+    }
+    let q = db()
       .from('recap_dom')
       .select('t_ms,events')
       .eq('session_id', v.sessionId)
-      .gte('t_ms', Math.max(0, v.tMs - 3000))
-      .order('t_ms', { ascending: true })
-      .order('id', { ascending: true })
-      .limit(12);
+      .gte('t_ms', Math.max(0, v.tMs - 1000));
+    if (untilMs !== undefined) q = q.lt('t_ms', untilMs);
+    const res = await q.order('t_ms', { ascending: true }).order('id', { ascending: true }).limit(2);
     if (res.error) return null; // older databases without web recordings
     const events: DomEvent[] = [];
     for (const r of (res.data ?? []) as { events: DomEvent[] }[]) if (Array.isArray(r.events)) events.push(...r.events);
     events.sort((a, b) => a.timestamp - b.timestamp);
-    // rrweb's clock and the session's are the same browser's: skip a snapshot of the screen before.
-    const viewedAt = Date.parse(v.startedAt) + v.tMs;
-    const fullAt = events.findIndex((e) => e.type === 2 && (!Number.isFinite(viewedAt) || e.timestamp >= viewedAt - 1000));
+    // rrweb's clock and the session's are the same browser's: keep to this visit to the screen.
+    const startedAt = Date.parse(v.startedAt);
+    const viewedAt = startedAt + v.tMs;
+    const leftAt = untilMs !== undefined ? startedAt + untilMs : Infinity;
+    const fullAt = events.findIndex(
+      (e) => e.type === 2 && (!Number.isFinite(viewedAt) || (e.timestamp >= viewedAt - 1000 && e.timestamp < leftAt)),
+    );
     if (fullAt < 0) continue;
     let meta: DomEvent | undefined;
     for (let i = fullAt - 1; i >= 0; i--) if (events[i]!.type === 4) (meta = events[i]), (i = -1);

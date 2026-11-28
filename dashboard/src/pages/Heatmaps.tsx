@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Heatmap } from '../components/Heatmap';
-import { PageHeatmap } from '../components/PageHeatmap';
+import { type PageElement, PageHeatmap } from '../components/PageHeatmap';
 import { eventNames } from '../lib/analytics';
 import { pageSnapshotFor, screenActivity, screenStats, screenshotFor, sessionsWithEvent } from '../lib/data';
 import {
@@ -19,37 +19,40 @@ import {
   toTap,
   topTargets,
 } from '../lib/heatmap';
-import { go, useAsync } from '../lib/util';
+import { go, useAsync, useKeyedAsync } from '../lib/util';
 import { Empty } from './Overview';
 
 export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: string; since: string; screen?: string; device?: string }) {
   const screens = useAsync(() => screenStats(appId, since), [appId, since]);
   const current = screen ?? screens.data?.[0]?.screen;
-  const activity = useAsync(
+  const activity = useKeyedAsync(
     () => (current ? screenActivity(appId, current, since) : Promise.resolve(null)),
-    [appId, since, current],
+    [appId, since, current ?? null],
   );
   // The device size is in the address (heatmaps/<screen>/<device>), so a shared link opens the same view.
   const device = DEVICE_CLASSES.some((d) => d.key === deviceArg) ? (deviceArg as DeviceClass) : null;
   const setDevice = (d: DeviceClass) => current && go(`heatmaps/${encodeURIComponent(current)}/${d}`);
-  const [names, setNames] = useState<Map<string, string>>(new Map());
+  // Tapped elements as the drawn page shows them: their names, and whether they act like controls.
+  const [elements, setElements] = useState<Map<string, PageElement>>(new Map());
   const [highlight, setHighlight] = useState<string | null>(null);
   useEffect(() => {
-    setNames(new Map());
+    setElements(new Map());
     setHighlight(null);
-  }, [appId, current]);
+  }, [appId, current, deviceArg]);
 
   // A segment: only the visits that did (or didn't) send one of the app's own events, e.g. signed_up.
   const [segment, setSegment] = useState<{ name: string; did: boolean } | null>(null);
   useEffect(() => setSegment(null), [appId]);
   const custom = useAsync(() => eventNames(appId, since).then((l) => l.filter((e) => e.kind === 'custom')), [appId, since]);
-  const segmentSessions = useAsync(
+  const segmentSessions = useKeyedAsync(
     () => (segment ? sessionsWithEvent(appId, segment.name, since) : Promise.resolve(null)),
-    [appId, since, segment?.name],
+    [appId, since, segment?.name ?? null],
   );
+  // While a segment loads, nothing is shown as if it were in it.
   const inSegment = useMemo(() => {
-    const set = segmentSessions.data;
-    if (!segment || !set) return () => true;
+    if (!segment) return () => true;
+    const set = segmentSessions.data?.sessions;
+    if (!set) return () => false;
     return (sessionId: string) => set.has(sessionId) === segment.did;
   }, [segment, segmentSessions.data]);
 
@@ -71,21 +74,22 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
   const here = useMemo(() => taps.filter((t) => t.device === shown), [taps, shown]);
   const viewport = layoutViewport(here, shown);
 
-  // Visits to this screen from this size of device, and how far down each one scrolled.
-  const visits = useMemo(() => {
+  // Visits to this screen from this size of device (all of them, for the page behind the taps), and
+  // the ones in the segment, with how far down each one scrolled.
+  const sizeVisits = useMemo(() => {
     const a = activity.data;
     if (!a) return [];
-    return a.views
-      .map((v) => ({ ...v, s: a.sessions.get(v.sessionId) }))
-      .filter((v) => v.s && deviceClass(v.s.screen_width) === shown && inSegment(v.sessionId));
-  }, [activity.data, shown, inSegment]);
+    return a.views.map((v) => ({ ...v, s: a.sessions.get(v.sessionId)! })).filter((v) => v.s && deviceClass(v.s.screen_width) === shown);
+  }, [activity.data, shown]);
+  const visits = useMemo(() => sizeVisits.filter((v) => inSegment(v.sessionId)), [sizeVisits, inSegment]);
   const reach = useMemo(
     () => scrollReach(visits.map((v) => v.sessionId), activity.data?.maxDepth ?? new Map()),
     [visits, activity.data],
   );
   const rage = useMemo(() => rageTaps(here), [here]);
-  const dead = useMemo(() => here.filter(isDeadTap), [here]);
-  const targets = useMemo(() => topTargets(here, (sel) => names.get(sel) ?? null), [here, names]);
+  const interactive = useMemo(() => (sel: string) => elements.get(sel)?.interactive, [elements]);
+  const dead = useMemo(() => here.filter((t) => isDeadTap(t, interactive)), [here, interactive]);
+  const targets = useMemo(() => topTargets(here, (sel) => elements.get(sel)?.name ?? null, interactive), [here, elements, interactive]);
   // Where the rage taps were, by element.
   const rageBy = useMemo(() => {
     const by = new Map<string, number>();
@@ -96,26 +100,26 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
     return targets.filter((t) => by.has(t.key)).map((t) => ({ ...t, rage: by.get(t.key)! })).sort((a, b) => b.rage - a.rage);
   }, [rage, targets]);
 
-  // The page behind the taps: the newest recorded visit at this size.
+  // The page behind the taps: a recorded visit at this size, nearest the taps' window width, newest
+  // first. Chosen from every visit at this size, so switching segment doesn't change the page.
   const recorded = useMemo(
     () =>
-      visits
-        .filter((v) => v.s!.platform === 'web' && v.s!.has_recording !== false)
-        .map((v) => ({ sessionId: v.sessionId, tMs: v.tMs, startedAt: v.s!.started_at })),
-    [visits],
+      sizeVisits
+        .filter((v) => v.s.platform === 'web' && v.s.has_recording !== false)
+        .map((v) => ({ sessionId: v.sessionId, tMs: v.tMs, startedAt: v.s.started_at, width: v.s.screen_width })),
+    [sizeVisits],
   );
-  const snapshotKey = recorded.slice(0, 8).map((v) => `${v.sessionId}:${v.tMs}`).join(',');
-  // Which recorded visit to draw: the newest first, and the next one on request (the newest may have
-  // had a menu open or been signed out).
+  const recordedKey = `${recorded.length}:${recorded.slice(0, 8).map((v) => `${v.sessionId}:${v.tMs}`).join(',')}`;
+  // Which recorded visit to draw, and the next one on request (one may have had a menu open).
   const [snapFrom, setSnapFrom] = useState(0);
-  useEffect(() => setSnapFrom(0), [snapshotKey]);
-  const snapshot = useAsync(
-    () => (web && recorded.length ? pageSnapshotFor(recorded, snapFrom) : Promise.resolve(null)),
-    [web, snapshotKey, snapFrom], // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setSnapFrom(0), [recordedKey, viewport.width]);
+  const snapshot = useKeyedAsync(
+    () => (web && recorded.length ? pageSnapshotFor(recorded, snapFrom, viewport.width) : Promise.resolve(null)),
+    [web, recordedKey, snapFrom, viewport.width],
   );
-  const shot = useAsync(
+  const shot = useKeyedAsync(
     () => (current && !web ? screenshotFor(appId, current) : Promise.resolve(null)),
-    [appId, current, web],
+    [appId, current ?? null, web],
   );
 
   if (screens.data && screens.data.length === 0) return <Empty />;
@@ -209,7 +213,7 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
               viewport={viewport}
               reach={reach}
               rage={rage}
-              onNames={setNames}
+              onElements={setElements}
               highlight={highlight}
             />
           ) : (
@@ -222,7 +226,8 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
           )}
           <p className="muted small">
             {loading ? 'Loading…' : `${here.length.toLocaleString()} taps from ${visitCount.toLocaleString()} visits in this period.`}{' '}
-            {activity.data?.capped && 'Only the newest 5,000 taps are shown. '}
+            {activity.data?.capped && `This period has more than the page reads, so the map covers ${new Date(activity.data.from).toLocaleString()} onwards. `}
+            {segmentSessions.data?.capped && 'The segment read its first 50,000 events, so a few visits may be missing from it. '}
             {!loading && visitCount > 0 && visitCount < 30 && (
               <strong className="warn-text">Only {visitCount} visits: a pattern this small can be chance. </strong>
             )}
@@ -249,10 +254,17 @@ export function Heatmaps({ appId, since, screen, device: deviceArg }: { appId: s
               No more recordings at this size. <button className="link" onClick={() => setSnapFrom(0)}>Back to the newest</button>
             </p>
           )}
-          {web && !snapshot.loading && !snapshot.data && snapFrom === 0 && (
+          {web && !snapshot.loading && !snapshot.data && snapFrom === 0 && recorded.length === 0 && (
             <p className="muted small">
               No recorded visit of this screen at this size yet, so the taps are drawn on a blank page. Turn on{' '}
-              <code>recordings</code> in the web script and the newest recorded visit is drawn here.
+              <code>recordings</code> in the web script and a recorded visit is drawn here.
+            </p>
+          )}
+          {web && !snapshot.loading && !snapshot.data && snapFrom === 0 && recorded.length > 0 && (
+            <p className="muted small">
+              The recorded visits reached this screen without loading a page, as a single-page app does, so none
+              has a picture of it of its own and the taps are drawn on a blank page. A visit that opens this screen
+              directly (by its address, or a reload) gives it one.
             </p>
           )}
           {!web && !shot.loading && !shot.data && (

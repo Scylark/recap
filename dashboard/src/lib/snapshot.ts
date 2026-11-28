@@ -19,7 +19,9 @@ interface SerializedNode {
   [key: string]: unknown;
 }
 
-const VIEWPORT_UNITS = /(-?(?:\d+\.?\d*|\.\d+))(dvh|svh|lvh|vh|vmax|vmin)\b/g;
+// The lookbehind anchors a number at its first digit, so a long run of digits (which a page, or anyone
+// with the public key, can upload) is read once instead of being retried from every position.
+const VIEWPORT_UNITS = /(?<![\d.])(-?(?:\d+(?:\.\d+)?|\.\d+))(dvh|svh|lvh|vh|vmax|vmin)\b/g;
 
 /** CSS with vh (and dvh, svh, lvh, vmax, vmin) written as the pixels they were in this window. */
 export function fixViewportUnits(css: string, width: number, height: number): string {

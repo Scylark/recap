@@ -9,6 +9,7 @@ import {
   pageHeightFromTaps,
   placeWebTap,
   rageTaps,
+  recordingOrder,
   scrollReach,
   toTap,
   targetsCsv,
@@ -65,11 +66,23 @@ describe('placing web taps', () => {
     expect(p.y).toBeCloseTo(2400);
   });
 
-  it('scales a tap from a narrower phone to the drawn width', () => {
+  it('moves a tap from a narrower phone across by its share, and keeps its depth in CSS px', () => {
     const t = toTap(webTap({ x: 187.5, y: 100, nx: 0.5, ny: 100 / 812, pageY: 1000 }, { vw: 375, vh: 812 }));
     const p = placeWebTap(t, 390, 3000);
     expect(p.x).toBeCloseTo(195);
-    expect(p.y).toBeCloseTo(1040);
+    expect(p.y).toBeCloseTo(1000);
+  });
+
+  it('does not stretch a desktop tap down a wider recording', () => {
+    const t = toTap(webTap({ x: 720, y: 400, nx: 0.5, ny: 400 / 900, pageY: 3000 }, { vw: 1440, vh: 900 }));
+    expect(placeWebTap(t, 1920, 6000).y).toBeCloseTo(3000);
+  });
+
+  it('takes the session window when the tap works out within 2% of it, so 1024 stays desktop', () => {
+    // round(x) / nx gives 1023.3 for a 1024 px window; the session says 1024.
+    const t = toTap(webTap({ x: 307, y: 100, nx: 0.3, ny: 0.125, pageY: 100 }, { vw: 1024, vh: 800 }));
+    expect(t.vw).toBe(1024);
+    expect(t.device).toBe('desktop');
   });
 
   it('draws a tap on a bar pinned to the bottom of the window on the bar, at the bottom of the page', () => {
@@ -100,8 +113,8 @@ describe('placing web taps', () => {
 
   it('sizes a page with no recording to its lowest tap', () => {
     const t = toTap(webTap({ x: 10, y: 100, nx: 10 / 390, ny: 100 / 844, pageY: 2000 }));
-    expect(pageHeightFromTaps([t], 390, 844)).toBe(2744);
-    expect(pageHeightFromTaps([], 390, 844)).toBe(844);
+    expect(pageHeightFromTaps([t], 844)).toBe(2744);
+    expect(pageHeightFromTaps([], 844)).toBe(844);
   });
 });
 
@@ -139,6 +152,13 @@ describe('rage and dead taps', () => {
     expect(rageTaps([at(0, 100, 900), at(200, 200, 900), at(400, 300, 900)])).toHaveLength(0);
   });
 
+  it('does not call a control dead when the recorded page shows it is one', () => {
+    const div = at(0, 1, 1, { tag: 'DIV', selector: '#card' });
+    expect(isDeadTap(div)).toBe(true);
+    expect(isDeadTap(div, (sel) => (sel === '#card' ? true : undefined))).toBe(false);
+    expect(isDeadTap(div, () => false)).toBe(true);
+  });
+
   it('calls a tap on a div dead, and a link, a labelled element or an app tap not', () => {
     expect(isDeadTap(at(0, 1, 1, { tag: 'DIV' }))).toBe(true);
     expect(isDeadTap(at(0, 1, 1, { tag: 'A' }))).toBe(false);
@@ -162,6 +182,15 @@ describe('drawing a recorded page at full length', () => {
     expect(fixViewportUnits('width:10vmax;height:10vmin', 390, 844)).toBe('width:84.4px;height:39px');
     expect(fixViewportUnits('margin:.5vh', 390, 844)).toBe('margin:4.22px');
     expect(fixViewportUnits('width:100vw', 390, 844)).toBe('width:100vw');
+    expect(fixViewportUnits('top:-10vh;height:1.5vh', 390, 844)).toBe('top:-84.4px;height:12.66px');
+  });
+
+  it('reads a long run of digits in one pass (an uploaded page cannot freeze the tab)', () => {
+    const css = 'a{height:1vh}' + '1'.repeat(20000) + 'x' + '9'.repeat(20000) + 'vh';
+    const t0 = performance.now();
+    const out = fixViewportUnits(css, 390, 844);
+    expect(performance.now() - t0).toBeLessThan(200);
+    expect(out.startsWith('a{height:8.44px}')).toBe(true);
   });
 
   it('fixes style text, inlined stylesheets and style attributes without changing the original', () => {
@@ -200,6 +229,10 @@ describe('for reports', () => {
     const low = toTap(webTap({ x: 1, y: 100, nx: 0.1, ny: 100 / 844, pageY: 1600 }));
     expect(aboveFoldShare([top, low, low, top])).toBe(0.5);
     expect(aboveFoldShare([])).toBeNull();
+    // A tap from a script before 1.3 has no page position: left out, not counted as above.
+    const old = toTap(webTap({ x: 1, y: 100, nx: 0.1, ny: 100 / 844 }));
+    expect(aboveFoldShare([old, low])).toBe(0);
+    expect(aboveFoldShare([old])).toBeNull();
   });
 
   it('writes Most tapped as CSV that a spreadsheet will not run as a formula', () => {
@@ -216,5 +249,18 @@ describe('for reports', () => {
     expect(lines[1]).toBe('Buy now,Buy now,12,9,30%,no');
     expect(lines[2]).toBe('"\'=HYPERLINK(""http://x"")",#price,3,2,7%,yes');
     expect(lines[3]).toBe('"Plans, prices",#a,1,1,3%,no');
+  });
+});
+
+describe('which recording to draw', () => {
+  it('prefers the width the taps came from (to 50 px), then the newest', () => {
+    const v = (id: string, width: number, day: number) => ({ sessionId: id, tMs: 0, startedAt: `2026-11-${day}T10:00:00.000Z`, width });
+    const order = recordingOrder([v('wide-new', 1920, 27), v('match-old', 1440, 20), v('match-new', 1440, 26), v('near', 1460, 27)], 1440);
+    expect(order.map((o) => o.sessionId)).toEqual(['near', 'match-new', 'match-old', 'wide-new']);
+  });
+
+  it('tries each visit to a screen once', () => {
+    const v = { sessionId: 'a', tMs: 5, startedAt: '2026-11-27T10:00:00.000Z' };
+    expect(recordingOrder([v, { ...v }, { ...v, tMs: 9 }])).toHaveLength(2);
   });
 });
